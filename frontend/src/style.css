@@ -1,0 +1,431 @@
+@import 'tailwindcss';
+@import 'tailwindcss-primeui';
+
+:root {
+    font-family: var(
+        --p-primary-font-family,
+        'Inter',
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif
+    );
+    --app-accent-secondary: #22d3ee;
+    --app-ambient-base: var(--p-surface-50, #f8f9ff);
+    --app-chart-accent-1: #6366f1;
+    --app-chart-accent-2: #3b82f6;
+    --app-chart-accent-3: #10b981;
+    --app-chart-accent-4: #22d3ee;
+    --app-chart-accent-5: #f97316;
+    --app-chart-accent-6: #a855f7;
+    --app-chart-accent-7: #f43f5e;
+    --app-chart-accent-8: #0ea5e9;
+    --app-chart-grid-strong: rgba(99, 102, 241, 0.08);
+    --app-chart-grid-muted: rgba(148, 163, 184, 0.12);
+    --app-chart-grid-soft: rgba(148, 163, 184, 0.1);
+    --app-text-primary: var(--p-surface-900, #0f172a);
+    --app-text-muted: rgba(71, 85, 105, 0.82);
+    --p-text-color: var(--app-text-primary);
+    --p-text-muted-color: var(--app-text-muted);
+}
+
+[data-theme='dark'] {
+    --app-accent-secondary: color-mix(
+        in srgb,
+        var(--app-accent-secondary, #22d3ee) 82%,
+        var(--p-primary-400, #818cf8)
+    );
+    --app-ambient-base: color-mix(
+        in srgb,
+        var(--p-surface-950, #020617) 85%,
+        var(--p-surface-900, #0f172a)
+    );
+    --app-chart-accent-1: color-mix(in srgb, var(--p-primary-200, #c7d2fe) 85%, transparent);
+    --app-chart-accent-2: color-mix(in srgb, var(--p-primary-300, #a5b4fc) 85%, transparent);
+    --app-chart-accent-3: color-mix(in srgb, var(--p-primary-100, #e0e7ff) 82%, transparent);
+    --app-chart-accent-4: color-mix(in srgb, var(--app-accent-secondary, #38bdf8) 80%, transparent);
+    --app-chart-accent-5: color-mix(in srgb, #f97316 80%, transparent);
+    --app-chart-accent-6: color-mix(in srgb, #fb923c 80%, transparent);
+    --app-chart-accent-7: color-mix(in srgb, #f472b6 75%, transparent);
+    --app-chart-accent-8: color-mix(in srgb, #38bdf8 75%, transparent);
+    --app-chart-grid-strong: color-mix(
+        in srgb,
+        var(--p-primary-400, #818cf8) 35%,
+        transparent
+    );
+    --app-chart-grid-muted: color-mix(
+        in srgb,
+        var(--p-primary-300, #a5b4fc) 28%,
+        transparent
+    );
+    --app-chart-grid-soft: color-mix(
+        in srgb,
+        var(--p-surface-400, #94a3b8) 22%,
+        transparent
+    );
+    --app-text-primary: rgba(241, 245, 249, 0.96);
+    --app-text-muted: rgba(226, 232, 240, 0.92);
+    --p-text-color: var(--app-text-primary);
+    --p-text-muted-color: var(--app-text-muted);
+    --p-surface-0: rgba(15, 23, 42, 0.86);
+    --p-surface-50: rgba(17, 24, 39, 0.78);
+    --p-surface-100: rgba(24, 35, 52, 0.64);
+    --p-surface-200: rgba(148, 163, 184, 0.26);
+    --p-surface-300: rgba(148, 163, 184, 0.32);
+    --p-content-border-color: rgba(148, 163, 184, 0.28);
+}
+
+@layer base {
+    body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+            radial-gradient(
+                circle at top left,
+                color-mix(in srgb, var(--p-primary-400, #818cf8) 30%, transparent),
+                color-mix(in srgb, var(--p-primary-200, #c7d2fe) 12%, transparent) 45%,
+                transparent 70%
+            ),
+            radial-gradient(
+                circle at bottom right,
+                color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 24%, transparent),
+                color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 12%, transparent) 55%,
+                transparent 80%
+            ),
+            var(--app-ambient-base, #f8f9ff);
+        color: var(--app-text-primary);
+    }
+
+    #app {
+        min-height: 100vh;
+    }
+
+    html[data-theme='dark'] body {
+        background:
+            radial-gradient(
+                circle at top left,
+                color-mix(in srgb, var(--p-primary-700, #4338ca) 35%, transparent),
+                color-mix(in srgb, var(--p-primary-600, #4f46e5) 18%, transparent) 45%,
+                transparent 70%
+            ),
+            radial-gradient(
+                circle at bottom right,
+                color-mix(in srgb, var(--app-accent-secondary, #38bdf8) 28%, transparent),
+                color-mix(in srgb, var(--app-accent-secondary, #38bdf8) 15%, transparent) 55%,
+                transparent 80%
+            ),
+            var(--app-ambient-base, #0f172a);
+        color: var(--app-text-primary);
+    }
+
+    .text-color {
+        color: var(--app-text-primary);
+    }
+
+    .text-muted-color {
+        color: var(--app-text-muted);
+    }
+}
+
+:root[data-brand-theme='lagoon'] {
+    --app-accent-secondary: #38bdf8;
+    --app-ambient-base: var(--p-surface-50, #f2fbfb);
+    --app-chart-accent-1: #0d9488;
+    --app-chart-accent-2: #14b8a6;
+    --app-chart-accent-3: #38bdf8;
+    --app-chart-accent-4: #0ea5e9;
+    --app-chart-accent-5: #2563eb;
+    --app-chart-accent-6: #22d3ee;
+    --app-chart-accent-7: #6366f1;
+    --app-chart-accent-8: #0891b2;
+    --app-chart-grid-strong: rgba(20, 184, 166, 0.18);
+    --app-chart-grid-muted: rgba(45, 212, 191, 0.16);
+    --app-chart-grid-soft: rgba(148, 163, 184, 0.12);
+}
+
+:root[data-brand-theme='ember'] {
+    --app-accent-secondary: #facc15;
+    --app-ambient-base: var(--p-surface-50, #fff8f1);
+    --app-chart-accent-1: #f97316;
+    --app-chart-accent-2: #fb923c;
+    --app-chart-accent-3: #facc15;
+    --app-chart-accent-4: #ef4444;
+    --app-chart-accent-5: #f472b6;
+    --app-chart-accent-6: #d946ef;
+    --app-chart-accent-7: #22d3ee;
+    --app-chart-accent-8: #fbbf24;
+    --app-chart-grid-strong: rgba(249, 115, 22, 0.2);
+    --app-chart-grid-muted: rgba(251, 146, 60, 0.18);
+    --app-chart-grid-soft: rgba(250, 204, 21, 0.12);
+}
+
+:root[data-theme='dark'][data-brand-theme='lagoon'] {
+    --app-ambient-base: color-mix(
+        in srgb,
+        #042f2e 88%,
+        #082f49
+    );
+    --app-chart-accent-1: color-mix(in srgb, #14b8a6 82%, transparent);
+    --app-chart-accent-2: color-mix(in srgb, #38bdf8 80%, transparent);
+    --app-chart-accent-3: color-mix(in srgb, #0ea5e9 78%, transparent);
+    --app-chart-accent-4: color-mix(in srgb, #0d9488 82%, transparent);
+    --app-chart-accent-5: color-mix(in srgb, #2563eb 75%, transparent);
+    --app-chart-accent-6: color-mix(in srgb, #06b6d4 78%, transparent);
+    --app-chart-accent-7: color-mix(in srgb, #0891b2 78%, transparent);
+    --app-chart-accent-8: color-mix(in srgb, #22d3ee 78%, transparent);
+    --app-chart-grid-strong: color-mix(in srgb, #22d3ee 32%, transparent);
+    --app-chart-grid-muted: color-mix(in srgb, #0ea5e9 26%, transparent);
+    --app-chart-grid-soft: color-mix(in srgb, #14b8a6 18%, transparent);
+}
+
+:root[data-theme='dark'][data-brand-theme='ember'] {
+    --app-ambient-base: color-mix(
+        in srgb,
+        #431407 82%,
+        #3f2116
+    );
+    --app-chart-accent-1: color-mix(in srgb, #f97316 82%, transparent);
+    --app-chart-accent-2: color-mix(in srgb, #fb923c 80%, transparent);
+    --app-chart-accent-3: color-mix(in srgb, #facc15 80%, transparent);
+    --app-chart-accent-4: color-mix(in srgb, #ef4444 78%, transparent);
+    --app-chart-accent-5: color-mix(in srgb, #f472b6 78%, transparent);
+    --app-chart-accent-6: color-mix(in srgb, #d946ef 78%, transparent);
+    --app-chart-accent-7: color-mix(in srgb, #fb7185 78%, transparent);
+    --app-chart-accent-8: color-mix(in srgb, #fde047 78%, transparent);
+    --app-chart-grid-strong: color-mix(in srgb, #fb923c 32%, transparent);
+    --app-chart-grid-muted: color-mix(in srgb, #facc15 26%, transparent);
+    --app-chart-grid-soft: color-mix(in srgb, #f97316 18%, transparent);
+}
+
+@layer components {
+    .app-shell {
+        position: relative;
+        isolation: isolate;
+    }
+
+    .app-ambient-bg {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: -1;
+    }
+
+    .app-ambient-blob {
+        position: absolute;
+        width: clamp(26rem, 42vw, 48rem);
+        aspect-ratio: 1 / 1;
+        border-radius: 999px;
+        filter: blur(120px);
+        opacity: 0.55;
+        transform: translate3d(0, 0, 0);
+    }
+
+    .app-ambient-blob--left {
+        top: -14rem;
+        left: max(-18rem, -20vw);
+        background: radial-gradient(
+            circle at center,
+            color-mix(in srgb, var(--p-primary-500, #6366f1) 45%, transparent) 0%,
+            color-mix(in srgb, var(--p-primary-600, #4f46e5) 25%, transparent) 45%,
+            transparent 70%
+        );
+    }
+
+    .app-ambient-blob--right {
+        bottom: -18rem;
+        right: max(-16rem, -20vw);
+        background: radial-gradient(
+            circle at center,
+            color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 38%, transparent) 0%,
+            color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 16%, transparent) 45%,
+            transparent 70%
+        );
+    }
+
+    .app-nav {
+        min-width: 0;
+    }
+
+    .nav-scroll {
+        min-width: 0;
+    }
+
+    .nav-scroll::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        white-space: nowrap;
+        border-radius: 999px;
+        padding: 0.5rem 0.85rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+        transition:
+            background-color 0.15s ease,
+            color 0.15s ease,
+            box-shadow 0.15s ease;
+    }
+
+    .nav-link.nav-link--mobile {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .nav-link--idle {
+        color: rgba(71, 85, 105, 0.85);
+    }
+
+    .nav-link--idle:hover {
+        color: rgba(30, 41, 59, 0.95);
+        background-color: color-mix(
+            in srgb,
+            var(--p-primary-200, #c7d2fe) 32%,
+            transparent
+        );
+    }
+
+    .nav-link--active {
+        color: var(--p-primary-700, #4338ca);
+        background-color: color-mix(
+            in srgb,
+            var(--p-primary-300, #a5b4fc) 38%,
+            transparent
+        );
+        box-shadow: 0 15px 40px -25px
+            color-mix(in srgb, var(--p-primary-600, #4f46e5) 55%, rgba(15, 23, 42, 0.35));
+    }
+
+    html[data-theme='dark'] .nav-link--idle {
+        color: rgba(226, 232, 240, 0.78);
+    }
+
+    html[data-theme='dark'] .nav-link--idle:hover {
+        color: rgba(248, 250, 252, 0.95);
+        background-color: color-mix(
+            in srgb,
+            var(--p-primary-700, #4338ca) 32%,
+            transparent
+        );
+    }
+
+    html[data-theme='dark'] .nav-link--active {
+        color: var(--p-primary-200, #c7d2fe);
+        background-color: color-mix(
+            in srgb,
+            var(--p-primary-700, #4338ca) 55%,
+            transparent
+        );
+        box-shadow: 0 18px 46px -28px
+            color-mix(in srgb, var(--p-primary-900, #312e81) 65%, rgba(2, 6, 23, 0.4));
+    }
+
+    .dashboard-card {
+        overflow: hidden;
+        border-radius: 1.5rem;
+        border: 1px solid rgba(226, 232, 240, 0.7);
+        background-color: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 22px 55px -35px
+            color-mix(in srgb, var(--p-primary-600, #4f46e5) 45%, rgba(15, 23, 42, 0.4));
+    }
+
+    .product-card {
+        overflow: hidden;
+        border-radius: 1.5rem;
+        border: 1px solid rgba(226, 232, 240, 0.7);
+        background-color: var(--p-surface-0, #ffffff);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 18px 40px -30px rgba(15, 23, 42, 0.35);
+    }
+
+    html[data-theme='dark'] .dashboard-card {
+        border-color: rgba(148, 163, 184, 0.28);
+        background-color: rgba(15, 23, 42, 0.76);
+        box-shadow: 0 26px 55px -30px
+            color-mix(in srgb, var(--p-primary-900, #312e81) 55%, rgba(2, 6, 23, 0.65));
+    }
+
+    html[data-theme='dark'] .product-card {
+        border-color: rgba(148, 163, 184, 0.26);
+        background-color: color-mix(in srgb, var(--p-surface-900, #0f172a) 85%, transparent);
+        box-shadow: 0 22px 45px -30px rgba(2, 6, 23, 0.65);
+    }
+
+    html[data-theme='dark'] .p-card {
+        color: var(--app-text-primary);
+    }
+
+    .p-card-header,
+    .p-card-footer {
+        @apply px-6 py-5;
+    }
+
+    .p-card-body {
+        padding: 0;
+    }
+
+    .p-card-content {
+        @apply px-6 py-5;
+    }
+
+    .product-card--compact .p-card-header,
+    .product-card--compact .p-card-body {
+        padding: 0.85rem 1rem;
+    }
+
+    .product-card--compact .p-card-content {
+        padding: 0;
+    }
+
+    .page-section {
+        @apply w-full px-4 sm:px-6;
+    }
+}
+
+@layer components {
+    .fade-scale-enter-active,
+    .fade-scale-leave-active {
+        transition: all 0.18s ease;
+    }
+
+    .fade-scale-enter-from,
+    .fade-scale-leave-to {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.98);
+    }
+
+    .app-nav-avatar {
+        width: 2.25rem;
+        height: 2.25rem;
+        font-size: 0.75rem;
+    }
+
+    html[data-theme='dark'] .app-nav-avatar {
+        background-color: color-mix(
+            in srgb,
+            var(--p-primary-300, #a5b4fc) 24%,
+            transparent
+        );
+        border-color: color-mix(
+            in srgb,
+            var(--p-primary-600, #4f46e5) 35%,
+            transparent
+        );
+        color: var(--p-primary-50, #eef2ff);
+    }
+}
+
+@layer utilities {
+    .truncate-2 {
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+    }
+}

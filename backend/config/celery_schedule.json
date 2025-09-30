@@ -1,0 +1,10 @@
+{
+  "pricing.update_all_products": {
+    "task": "pricing.update_all_products",
+    "schedule": 21600,
+    "args": [],
+    "kwargs": {"logging": false},
+    "enabled": true
+  }
+}
+

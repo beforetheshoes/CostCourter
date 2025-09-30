@@ -1,0 +1,13 @@
+.env
+storage
+public/build
+public/hot
+node_modules
+core
+backend/.venv/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+frontend/node_modules/
+.uv-cache/
+**/__pycache__/

@@ -1,0 +1,60 @@
+# General
+.DS_Store
+Thumbs.db
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.hypothesis/
+backend/.coverage
+backend/.venv/
+backend/.tox/
+backend/.idea/
+backend/.vscode/
+backend/.python-version
+backend/.ruff_cache/
+backend/.uv
+backend/.uv.*/
+
+# Node/Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.eslintcache
+
+# Build artifacts
+*.egg-info/
+*.pyc
+
+# VSCode/IDE metadata
+.vscode/
+.idea/
+.fleet/
+.zed/
+
+# Misc project scratch space
+scratch/
+/tmp/
+
+# Docker volumes
+redisdata/
+pgdata/
+mysql/
