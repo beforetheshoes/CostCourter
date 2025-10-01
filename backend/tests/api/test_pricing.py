@@ -11,7 +11,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-import app.api.deps as api_deps
 import app.models as models
 from app.core.config import settings
 from app.core.database import get_session
@@ -501,17 +500,11 @@ def test_fetch_product_prices_endpoint_requires_admin(
     client: TestClient,
 ) -> None:
     token = client.headers.pop("Authorization", None)
-    previous_auth_bypass = settings.auth_bypass
-    previous_auto_error = api_deps._bearer_scheme.auto_error
-    settings.auth_bypass = False
-    api_deps._bearer_scheme.auto_error = True
     try:
         response = client.post("/api/pricing/products/1/fetch")
     finally:
         if token is not None:
             client.headers["Authorization"] = token
-        settings.auth_bypass = previous_auth_bypass
-        api_deps._bearer_scheme.auto_error = previous_auto_error
 
     assert response.status_code in {401, 403}
     payload = response.json()
@@ -522,17 +515,11 @@ def test_fetch_all_product_prices_endpoint_requires_admin(
     client: TestClient,
 ) -> None:
     token = client.headers.pop("Authorization", None)
-    previous_auth_bypass = settings.auth_bypass
-    previous_auto_error = api_deps._bearer_scheme.auto_error
-    settings.auth_bypass = False
-    api_deps._bearer_scheme.auto_error = True
     try:
         response = client.post("/api/pricing/products/fetch-all")
     finally:
         if token is not None:
             client.headers["Authorization"] = token
-        settings.auth_bypass = previous_auth_bypass
-        api_deps._bearer_scheme.auto_error = previous_auto_error
 
     assert response.status_code in {401, 403}
     payload = response.json()

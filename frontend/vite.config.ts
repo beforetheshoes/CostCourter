@@ -22,7 +22,13 @@ export default defineConfig({
         setupFiles: ['./vitest.setup.ts'],
         coverage: {
             reporter: ['text', 'html', 'lcov'],
-            include: ['src/**/*.{ts,tsx,js,jsx,vue}'],
+            include: [
+                'src/components/**/*.{ts,tsx,js,jsx,vue}',
+                'src/stores/**/*.{ts,tsx,js,jsx}',
+                'src/lib/**/*.{ts,tsx,js,jsx}',
+                'src/router/**/*.{ts,tsx,js,jsx}',
+            ],
+            exclude: ['src/views/**'],
         },
     },
 })

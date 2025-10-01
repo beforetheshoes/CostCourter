@@ -25,7 +25,12 @@ from app.models import (
     Tag,
     User,
 )
-from app.services.notification_preferences import UnknownNotificationChannelError
+from app.schemas import NotificationChannelUpdateRequest
+from app.services.notification_preferences import (
+    UnknownNotificationChannelError,
+    decrypt_secret_value,
+    update_notification_channel_for_user,
+)
 from app.services.price_cache import rebuild_product_price_cache
 from app.services.price_fetcher import (
     PriceFetcherService,
@@ -695,15 +700,18 @@ def test_notifications_list_cli_outputs_channels() -> None:
             session.add(user)
             session.commit()
             session.refresh(user)
-            session.add(
-                NotificationSetting(
-                    user_id=user.id,
-                    channel="pushover",
+            update_notification_channel_for_user(
+                session,
+                user,
+                "pushover",
+                NotificationChannelUpdateRequest(
                     enabled=False,
-                    config={"user_key": "override"},
-                )
+                    config={
+                        "api_token": "user-token",
+                        "user_key": "override",
+                    },
+                ),
             )
-            session.commit()
 
         runner = CliRunner()
         result = runner.invoke(
@@ -716,6 +724,7 @@ def test_notifications_list_cli_outputs_channels() -> None:
         assert "email" in result.stdout
         assert "pushover" in result.stdout
         assert "no" in result.stdout  # pushover disabled
+        assert "api_token=[secret]" in result.stdout
     finally:
         for key, value in previous.items():
             setattr(settings, key, value)
@@ -791,12 +800,15 @@ def test_notifications_set_cli_updates_preferences() -> None:
                 "pushover",
                 "--enable",
                 "--set",
+                "api_token=user-token",
+                "--set",
                 "user_key=override",
             ],
         )
 
         assert result.exit_code == 0, result.stdout
         assert "enabled" in result.stdout
+        assert "[secret]" in result.stdout
 
         with Session(manage.engine) as session:
             setting = session.exec(
@@ -805,7 +817,16 @@ def test_notifications_set_cli_updates_preferences() -> None:
                 )
             ).one()
             assert setting.enabled is True
-            assert setting.config == {"user_key": "override"}
+            assert setting.config is not None
+            assert set(setting.config.keys()) == {"api_token", "user_key"}
+            assert setting.config["api_token"] != "user-token"
+            assert setting.config["user_key"] != "override"
+            api_token_value = setting.config["api_token"]
+            user_key_value = setting.config["user_key"]
+            assert isinstance(api_token_value, str)
+            assert isinstance(user_key_value, str)
+            assert decrypt_secret_value(api_token_value) == "user-token"
+            assert decrypt_secret_value(user_key_value) == "override"
     finally:
         for key, value in previous.items():
             setattr(settings, key, value)

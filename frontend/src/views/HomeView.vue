@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { storeToRefs } from 'pinia'
+
 import AdminDashboardMetrics from '../components/AdminDashboardMetrics.vue'
-import LoginForm from '../components/LoginForm.vue'
 import { useAuthStore } from '../stores/useAuthStore'
 
 const authStore = useAuthStore()
+const { currentUser } = storeToRefs(authStore)
 </script>
 
 <template>
@@ -29,7 +31,10 @@ const authStore = useAuthStore()
                 <h1
                     class="text-3xl font-semibold leading-snug text-color sm:text-4xl"
                 >
-                    CostCourter Admin
+                    Welcome back,
+                    <span class="text-primary-600">
+                        {{ currentUser?.full_name ?? currentUser?.email }}
+                    </span>
                 </h1>
                 <p class="text-base text-muted-color sm:text-lg">
                     Manage catalog data, trigger price refreshes, and monitor
@@ -66,18 +71,11 @@ const authStore = useAuthStore()
                 >
                     <div>
                         <h2 class="text-xl font-semibold text-color">
-                            {{
-                                authStore.isAuthenticated
-                                    ? 'Welcome back'
-                                    : 'Sign in to continue'
-                            }}
+                            Your administrative workspace
                         </h2>
                         <p class="text-sm text-muted-color">
-                            {{
-                                authStore.isAuthenticated
-                                    ? 'Explore your administrative tools using the navigation above.'
-                                    : 'Use single sign-on to access the CostCourter control room.'
-                            }}
+                            Explore maintenance tasks, run refreshes, and keep
+                            an eye on key metrics across the platform.
                         </p>
                     </div>
                     <i
@@ -92,10 +90,7 @@ const authStore = useAuthStore()
             </template>
             <template #content>
                 <div class="flex flex-col gap-6">
-                    <div
-                        v-if="authStore.isAuthenticated"
-                        class="grid gap-3 text-left sm:grid-cols-3"
-                    >
+                    <div class="grid gap-3 text-left sm:grid-cols-3">
                         <div
                             class="rounded-2xl border border-surface-200/80 bg-surface-0/80 p-4"
                         >
@@ -142,8 +137,7 @@ const authStore = useAuthStore()
                             </p>
                         </div>
                     </div>
-                    <LoginForm v-else />
-                    <AdminDashboardMetrics v-if="authStore.isAuthenticated" />
+                    <AdminDashboardMetrics />
                 </div>
             </template>
         </PvCard>

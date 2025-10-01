@@ -13,7 +13,7 @@ This backend is the FastAPI + Celery service that now powers CostCourter end to 
    # optional: in another terminal if you need background jobs
    ./scripts/dev/run-worker.sh
    ```
-   The API is available at <http://localhost:8000>; auth is bypassed for local development.
+   The API is available at <http://localhost:8000>; obtain a JWT via the auth endpoints before calling protected routes. For passwordless local access, configure `PASSKEY_RELYING_PARTY_ID=localhost` and `PASSKEY_ORIGIN=http://localhost:5173` (already set in `.env.local`) and register a passkey from the admin UI.
 4. If you prefer full container orchestration, `docker compose up` still boots the entire stack (FastAPI, Celery, Postgres, Redis, scraper, etc.).
 
 Refer to `docs/backend-architecture-blueprint.md` for architecture details; database design decisions and migrations now live entirely in the FastAPI stack.

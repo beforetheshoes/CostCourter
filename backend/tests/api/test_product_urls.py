@@ -956,6 +956,33 @@ def test_quick_add_recovers_metadata_from_direct_fetch(
         assert product.image_url == "https://img.example.com/widget.png"
 
 
+def test_parse_scraper_payload_prefers_secure_image_url() -> None:
+    payload = {
+        "meta": {
+            "og:image": "http://cdn.example.com/image.jpg",
+            "og:image:secure_url": "https://cdn.example.com/image.jpg",
+        }
+    }
+
+    result = product_quick_add._parse_scraper_payload(
+        "https://example.com/product", payload
+    )
+
+    assert result["image"] == "https://cdn.example.com/image.jpg"
+
+
+def test_parse_scraper_payload_normalizes_protocol_relative_image_url() -> None:
+    payload = {
+        "meta": {"og:image": "//cdn.example.com/asset.png"},
+    }
+
+    result = product_quick_add._parse_scraper_payload(
+        "https://example.com/product", payload
+    )
+
+    assert result["image"] == "https://cdn.example.com/asset.png"
+
+
 def test_bulk_import_creates_new_product_and_urls(
     client: TestClient,
     engine: Engine,

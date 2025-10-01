@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
+import type { MenuMethods } from 'primevue/menu'
+import type { MenuItem } from 'primevue/menuitem'
 
 import SparklineChart from '../components/SparklineChart.vue'
 import ProductHistoryChart from '../components/ProductHistoryChart.vue'
@@ -11,6 +14,7 @@ import {
 } from '../stores/useProductsStore'
 import { usePriceHistoryStore } from '../stores/usePriceHistoryStore'
 import { usePricingStore } from '../stores/usePricingStore'
+import { useTagsStore } from '../stores/useTagsStore'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,9 +30,193 @@ const refreshingProduct = ref(false)
 const updatingUrlId = ref<number | null>(null)
 const promotingUrlId = ref<number | null>(null)
 const deletingUrlId = ref<number | null>(null)
+const refreshingMetadataId = ref<number | null>(null)
+const metadataMessage = ref<string | null>(null)
 const newUrlForm = ref({ url: '', setPrimary: false })
 const addUrlError = ref<string | null>(null)
 const addingUrl = ref(false)
+
+const tagsStore = useTagsStore()
+const {
+    items: availableTags,
+    loading: tagsLoading,
+    error: tagsStoreError,
+} = storeToRefs(tagsStore)
+
+const editingTitle = ref(false)
+const titleDraft = ref('')
+const savingTitle = ref(false)
+const titleError = ref<string | null>(null)
+
+const selectedTagIds = ref<number[]>([])
+const tagsDirty = ref(false)
+const tagsSaving = ref(false)
+const tagsUpdateError = ref<string | null>(null)
+
+const newTagName = ref('')
+const creatingTag = ref(false)
+const newTagError = ref<string | null>(null)
+
+const slugify = (value: string) =>
+    value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+
+const resolveTagSlug = (name: string) => {
+    const normalized = slugify(name)
+    if (normalized) return normalized
+    const fallback = slugify(`${name}-tag`)
+    return fallback || `tag-${Date.now()}`
+}
+
+const resetTitleDraft = () => {
+    titleDraft.value = product.value?.name ?? ''
+}
+
+const resetTagSelection = () => {
+    if (product.value) {
+        selectedTagIds.value = product.value.tags.map((tag) => tag.id)
+    } else {
+        selectedTagIds.value = []
+    }
+    tagsDirty.value = false
+}
+
+const startTitleEdit = () => {
+    editingTitle.value = true
+    titleError.value = null
+    resetTitleDraft()
+}
+
+const cancelTitleEdit = () => {
+    editingTitle.value = false
+    titleError.value = null
+    resetTitleDraft()
+}
+
+const saveTitle = async () => {
+    if (!product.value || savingTitle.value) return
+    const trimmed = titleDraft.value.trim()
+    if (!trimmed) {
+        titleError.value = 'Title is required.'
+        return
+    }
+    if (trimmed === product.value.name) {
+        editingTitle.value = false
+        titleError.value = null
+        return
+    }
+
+    savingTitle.value = true
+    titleError.value = null
+    try {
+        const updated = await productsStore.update(product.value.id, {
+            name: trimmed,
+        })
+        product.value = updated
+        editingTitle.value = false
+    } catch (err) {
+        titleError.value =
+            err instanceof Error
+                ? err.message
+                : 'Failed to update product title.'
+    } finally {
+        savingTitle.value = false
+    }
+}
+
+const resolveTagSlugById = (id: number) => {
+    const fromAvailable = availableTags.value.find((tag) => tag.id === id)
+    if (fromAvailable?.slug) return fromAvailable.slug
+    const fromProduct = product.value?.tags.find((tag) => tag.id === id)
+    return fromProduct?.slug ?? null
+}
+
+const handleTagSelection = (value: number[]) => {
+    selectedTagIds.value = value
+    tagsDirty.value = true
+    tagsUpdateError.value = null
+}
+
+const applySelectedTags = async () => {
+    if (!product.value || tagsSaving.value || !tagsDirty.value) return
+
+    const tagSlugs = selectedTagIds.value
+        .map((id) => resolveTagSlugById(id))
+        .filter((slug): slug is string => Boolean(slug))
+
+    if (tagSlugs.length !== selectedTagIds.value.length) {
+        tagsUpdateError.value =
+            'Unable to determine slugs for one or more selected tags.'
+        return
+    }
+
+    tagsSaving.value = true
+    tagsUpdateError.value = null
+    try {
+        const updated = await productsStore.update(product.value.id, {
+            tag_slugs: tagSlugs,
+        })
+        tagsDirty.value = false
+        product.value = updated
+    } catch (err) {
+        tagsUpdateError.value =
+            err instanceof Error ? err.message : 'Failed to update tags.'
+    } finally {
+        tagsSaving.value = false
+    }
+}
+
+const createAndAssignTag = async () => {
+    if (!product.value || creatingTag.value || tagsSaving.value) return
+    const name = newTagName.value.trim()
+    if (!name) {
+        newTagError.value = 'Tag name is required.'
+        return
+    }
+
+    creatingTag.value = true
+    newTagError.value = null
+    try {
+        const slug = resolveTagSlug(name)
+        const created = await tagsStore.create({ name, slug })
+        const nextSelection = Array.from(
+            new Set([...selectedTagIds.value, created.id]),
+        )
+        handleTagSelection(nextSelection)
+        await applySelectedTags()
+        newTagName.value = ''
+    } catch (err) {
+        newTagError.value =
+            err instanceof Error ? err.message : 'Failed to create tag.'
+    } finally {
+        creatingTag.value = false
+    }
+}
+
+const urlActionMenuRefs = new Map<number, MenuMethods>()
+
+const setUrlActionMenuRef = (entryId: number, instance: MenuMethods | null) => {
+    if (instance) {
+        urlActionMenuRefs.set(entryId, instance)
+    } else {
+        urlActionMenuRefs.delete(entryId)
+    }
+}
+
+const isUrlActionBusy = (entry: ProductURL) =>
+    refreshingMetadataId.value === entry.id ||
+    updatingUrlId.value === entry.id ||
+    promotingUrlId.value === entry.id ||
+    deletingUrlId.value === entry.id
+
+const openUrlActionMenu = (event: MouseEvent, entry: ProductURL) => {
+    const menu = urlActionMenuRefs.get(entry.id)
+    menu?.toggle(event)
+}
 
 const productId = computed(() => Number(route.params.id))
 
@@ -54,6 +242,7 @@ const fetchProduct = async () => {
         if (result) {
             await historyStore.loadForProduct(result.id)
         }
+        metadataMessage.value = null
     } catch (err) {
         error.value =
             err instanceof Error ? err.message : 'Unable to load product'
@@ -65,6 +254,23 @@ const fetchProduct = async () => {
 onMounted(() => {
     void fetchProduct()
 })
+
+onMounted(() => {
+    if (availableTags.value.length === 0) {
+        void tagsStore.list()
+    }
+})
+
+watch(
+    () => product.value,
+    () => {
+        if (!editingTitle.value) {
+            resetTitleDraft()
+        }
+        resetTagSelection()
+    },
+    { immediate: true },
+)
 
 watch(
     () => route.params.id,
@@ -91,8 +297,17 @@ const formatPrice = (
     currency: string | null,
 ) => {
     if (value == null) return '—'
-    const formatted = value.toFixed(2)
-    return currency ? `${currency} ${formatted}` : formatted
+    if (currency) {
+        try {
+            return new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency,
+            }).format(value)
+        } catch (err) {
+            console.error('Failed to format price', err)
+        }
+    }
+    return value.toFixed(2)
 }
 
 const selectedUrls = computed(() => product.value?.urls ?? [])
@@ -209,6 +424,84 @@ const deleteTrackedUrl = async (entry: ProductURL) => {
     }
 }
 
+const refreshUrlMetadata = async (entry: ProductURL) => {
+    if (!product.value || refreshingMetadataId.value === entry.id) {
+        return
+    }
+
+    metadataMessage.value = null
+    try {
+        refreshingMetadataId.value = entry.id
+        const result = await productsStore.refreshUrlMetadata(
+            product.value.id,
+            entry.id,
+        )
+        product.value = result.product
+
+        const updatedFields: string[] = []
+        if (result.name_updated) updatedFields.push('title')
+        if (result.image_updated) updatedFields.push('image')
+
+        let message =
+            updatedFields.length > 0
+                ? `Updated ${updatedFields.join(' and ')} from source metadata.`
+                : 'Checked source metadata; no changes detected.'
+        if (result.warnings.length) {
+            message = `${message} ${result.warnings.join(' ')}`
+        }
+        metadataMessage.value = message.trim()
+    } catch (err) {
+        metadataMessage.value =
+            err instanceof Error ? err.message : 'Failed to refresh metadata.'
+    } finally {
+        refreshingMetadataId.value = null
+    }
+}
+
+const getUrlActionItems = (entry: ProductURL): MenuItem[] => [
+    {
+        label:
+            refreshingMetadataId.value === entry.id
+                ? 'Refreshing metadata…'
+                : 'Refresh metadata',
+        icon: 'pi pi-image',
+        disabled: refreshingMetadataId.value === entry.id,
+        command: () => {
+            void refreshUrlMetadata(entry)
+        },
+    },
+    {
+        label: 'Set Primary URL',
+        icon: 'pi pi-star',
+        disabled: entry.is_primary || promotingUrlId.value === entry.id,
+        command: () => {
+            void setPrimaryUrl(entry)
+        },
+    },
+    {
+        label:
+            updatingUrlId.value === entry.id
+                ? 'Updating status…'
+                : entry.active
+                  ? 'Deactivate'
+                  : 'Activate',
+        icon: entry.active ? 'pi pi-stop' : 'pi pi-play',
+        disabled: updatingUrlId.value === entry.id,
+        command: () => {
+            void toggleUrlActive(entry)
+        },
+    },
+    {
+        label: deletingUrlId.value === entry.id ? 'Deleting…' : 'Delete',
+        icon: 'pi pi-trash',
+        disabled: deletingUrlId.value === entry.id,
+        command: () => {
+            void deleteTrackedUrl(entry)
+        },
+        class: 'text-red-500',
+    },
+]
+
 const addTrackedUrl = async () => {
     if (!product.value || addingUrl.value) return
     const trimmed = newUrlForm.value.url.trim()
@@ -262,10 +555,20 @@ const productInitial = computed(
         v-if="product && !loading"
         class="page-section max-w-5xl mx-auto space-y-6"
     >
-        <header class="flex flex-wrap items-start justify-between gap-6">
-            <div class="flex flex-wrap items-start gap-6">
+        <header class="space-y-4">
+            <button
+                type="button"
+                class="text-sm text-muted-color hover:text-primary flex items-center gap-2"
+                @click="close"
+            >
+                <i class="pi pi-arrow-left"></i>
+                Back to products
+            </button>
+            <div
+                class="flex flex-col gap-6 rounded-border border border-surface-200 bg-surface-0 p-6 md:flex-row md:items-start md:gap-8"
+            >
                 <div
-                    class="h-32 w-32 overflow-hidden rounded-border bg-surface-100 flex items-center justify-center"
+                    class="h-32 w-32 flex-shrink-0 overflow-hidden rounded-border bg-surface-100 flex items-center justify-center"
                 >
                     <img
                         v-if="product.image_url"
@@ -281,44 +584,162 @@ const productInitial = computed(
                         {{ productInitial }}
                     </div>
                 </div>
-                <div class="space-y-3">
-                    <button
-                        type="button"
-                        class="text-sm text-muted-color hover:text-primary flex items-center gap-2"
-                        @click="close"
-                    >
-                        <i class="pi pi-arrow-left"></i>
-                        Back to products
-                    </button>
-                    <h1 class="text-3xl font-semibold text-color">
-                        {{ product.name }}
-                    </h1>
-                    <div class="flex flex-wrap gap-2 text-xs">
-                        <span
-                            v-for="tag in product.tags"
-                            :key="tag.id"
-                            class="rounded-full bg-surface-200 px-3 py-1 text-muted-color"
-                        >
-                            {{ tag.name }}
-                        </span>
+                <div class="flex-1 space-y-6">
+                    <div class="space-y-3">
+                        <div class="flex flex-wrap items-start gap-3">
+                            <div class="flex-1 min-w-[16rem]">
+                                <template v-if="editingTitle">
+                                    <PvInputText
+                                        v-model="titleDraft"
+                                        class="w-full"
+                                        placeholder="Product title"
+                                        :disabled="savingTitle"
+                                        @keyup.enter.prevent="saveTitle"
+                                    />
+                                </template>
+                                <template v-else>
+                                    <h1
+                                        class="text-3xl font-semibold text-color break-words"
+                                    >
+                                        {{ product.name }}
+                                    </h1>
+                                </template>
+                                <p
+                                    v-if="titleError"
+                                    class="mt-2 text-sm text-red-600"
+                                >
+                                    {{ titleError }}
+                                </p>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <template v-if="editingTitle">
+                                    <PvButton
+                                        size="small"
+                                        icon="pi pi-check"
+                                        label="Save title"
+                                        :loading="savingTitle"
+                                        @click="saveTitle"
+                                    />
+                                    <PvButton
+                                        size="small"
+                                        severity="secondary"
+                                        icon="pi pi-times"
+                                        label="Cancel"
+                                        :disabled="savingTitle"
+                                        @click="cancelTitleEdit"
+                                    />
+                                </template>
+                                <template v-else>
+                                    <PvButton
+                                        size="small"
+                                        severity="secondary"
+                                        icon="pi pi-pencil"
+                                        label="Edit title"
+                                        @click="startTitleEdit"
+                                    />
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span
+                                class="text-xs font-semibold uppercase tracking-wide text-muted-color"
+                            >
+                                Tags
+                            </span>
+                            <span v-if="tagsDirty" class="text-xs text-primary">
+                                Unsaved changes
+                            </span>
+                        </div>
+                        <div class="flex flex-col gap-3">
+                            <div
+                                class="flex flex-col gap-2 md:flex-row md:items-center md:gap-3"
+                            >
+                                <PvMultiSelect
+                                    :model-value="selectedTagIds"
+                                    :options="availableTags"
+                                    option-label="name"
+                                    option-value="id"
+                                    display="chip"
+                                    filter
+                                    placeholder="Select tags"
+                                    class="w-full md:max-w-sm"
+                                    :loading="tagsLoading"
+                                    :disabled="tagsLoading"
+                                    @update:model-value="handleTagSelection"
+                                />
+                                <div class="flex items-center gap-2">
+                                    <PvButton
+                                        size="small"
+                                        icon="pi pi-check"
+                                        label="Apply tags"
+                                        :loading="tagsSaving"
+                                        :disabled="!tagsDirty || tagsSaving"
+                                        @click="applySelectedTags"
+                                    />
+                                    <PvButton
+                                        v-if="tagsDirty"
+                                        size="small"
+                                        icon="pi pi-undo"
+                                        label="Reset"
+                                        severity="secondary"
+                                        :disabled="tagsSaving"
+                                        @click="resetTagSelection"
+                                    />
+                                </div>
+                            </div>
+                            <div
+                                class="flex flex-col gap-2 md:flex-row md:items-center md:gap-3"
+                            >
+                                <PvInputText
+                                    v-model="newTagName"
+                                    class="w-full md:max-w-sm"
+                                    placeholder="Create and assign new tag"
+                                    :disabled="creatingTag"
+                                    @keyup.enter.prevent="createAndAssignTag"
+                                />
+                                <PvButton
+                                    size="small"
+                                    icon="pi pi-plus"
+                                    label="Add tag"
+                                    :loading="creatingTag"
+                                    :disabled="creatingTag || tagsSaving"
+                                    @click="createAndAssignTag"
+                                />
+                            </div>
+                        </div>
+                        <p v-if="tagsStoreError" class="text-sm text-red-600">
+                            {{ tagsStoreError }}
+                        </p>
+                        <p v-if="tagsUpdateError" class="text-sm text-red-600">
+                            {{ tagsUpdateError }}
+                        </p>
+                        <p v-if="newTagError" class="text-sm text-red-600">
+                            {{ newTagError }}
+                        </p>
                     </div>
                 </div>
-            </div>
-            <div class="flex flex-col gap-3 text-right">
                 <div
-                    class="flex items-center gap-2 text-sm"
-                    :class="trendMeta.tone"
+                    class="flex flex-col items-end justify-between gap-4 md:w-52"
                 >
-                    <i :class="trendMeta.icon"></i>
-                    <span>{{ trendMeta.label }}</span>
-                </div>
-                <div class="text-sm text-muted-color">
-                    Last refresh:
-                    <strong class="text-color">{{
-                        formatTimestamp(lastRefreshed)
-                    }}</strong>
-                </div>
-                <div class="flex gap-2 justify-end">
+                    <div
+                        class="flex flex-col items-end gap-2 text-right text-sm"
+                    >
+                        <div
+                            class="flex items-center gap-2"
+                            :class="trendMeta.tone"
+                        >
+                            <i :class="trendMeta.icon"></i>
+                            <span>{{ trendMeta.label }}</span>
+                        </div>
+                        <div class="text-muted-color">
+                            Last refresh:
+                            <strong class="text-color">{{
+                                formatTimestamp(lastRefreshed)
+                            }}</strong>
+                        </div>
+                    </div>
                     <PvButton
                         icon="pi pi-refresh"
                         label="Refresh prices"
@@ -428,6 +849,9 @@ const productInitial = computed(
                     <p v-if="addUrlError" class="text-sm text-red-600">
                         {{ addUrlError }}
                     </p>
+                    <p v-if="metadataMessage" class="text-sm text-muted-color">
+                        {{ metadataMessage }}
+                    </p>
                 </div>
                 <div
                     v-if="selectedUrls.length === 0"
@@ -454,13 +878,10 @@ const productInitial = computed(
                         </thead>
                         <tbody class="divide-y divide-surface-200">
                             <tr v-for="entry in selectedUrls" :key="entry.id">
-                                <td class="px-4 py-3 text-color">
-                                    <div>{{ entry.store?.name ?? '—' }}</div>
-                                    <div class="text-xs text-muted-color">
-                                        {{ entry.store?.slug ?? '—' }}
-                                    </div>
+                                <td class="px-4 py-3 text-color align-middle">
+                                    {{ entry.store?.name ?? '—' }}
                                 </td>
-                                <td class="px-4 py-3 align-top">
+                                <td class="px-4 py-3 align-middle">
                                     <a
                                         :href="entry.url"
                                         target="_blank"
@@ -470,7 +891,9 @@ const productInitial = computed(
                                         {{ entry.url }}
                                     </a>
                                 </td>
-                                <td class="px-4 py-3 text-muted-color">
+                                <td
+                                    class="px-4 py-3 text-muted-color align-middle"
+                                >
                                     {{
                                         formatPrice(
                                             entry.latest_price ?? null,
@@ -478,63 +901,52 @@ const productInitial = computed(
                                         )
                                     }}
                                 </td>
-                                <td class="px-4 py-3 text-muted-color">
+                                <td
+                                    class="px-4 py-3 text-muted-color align-middle"
+                                >
                                     {{
                                         formatTimestamp(
                                             entry.latest_price_at ?? null,
                                         )
                                     }}
                                 </td>
-                                <td class="px-4 py-3 text-muted-color">
+                                <td
+                                    class="px-4 py-3 text-muted-color align-middle"
+                                >
                                     {{ entry.is_primary ? 'Yes' : 'No' }}
                                 </td>
-                                <td class="px-4 py-3 text-muted-color">
+                                <td
+                                    class="px-4 py-3 text-muted-color align-middle"
+                                >
                                     {{ entry.active ? 'Yes' : 'No' }}
                                 </td>
-                                <td class="px-4 py-3">
-                                    <div class="flex flex-wrap gap-2">
-                                        <PvButton
-                                            size="small"
-                                            :severity="
-                                                entry.active
-                                                    ? 'secondary'
-                                                    : 'success'
+                                <td class="px-4 py-3 align-middle">
+                                    <div class="flex justify-end">
+                                        <PvMenu
+                                            :ref="
+                                                (instance) =>
+                                                    setUrlActionMenuRef(
+                                                        entry.id,
+                                                        instance,
+                                                    )
                                             "
-                                            :loading="
-                                                updatingUrlId === entry.id
-                                            "
-                                            :label="
-                                                entry.active
-                                                    ? 'Deactivate'
-                                                    : 'Activate'
-                                            "
-                                            :icon="
-                                                entry.active
-                                                    ? 'pi pi-stop'
-                                                    : 'pi pi-play'
-                                            "
-                                            @click="toggleUrlActive(entry)"
+                                            popup
+                                            :model="getUrlActionItems(entry)"
                                         />
                                         <PvButton
                                             size="small"
-                                            severity="info"
-                                            :disabled="entry.is_primary"
-                                            :loading="
-                                                promotingUrlId === entry.id
+                                            severity="secondary"
+                                            label="Actions"
+                                            icon="pi pi-ellipsis-v"
+                                            :loading="isUrlActionBusy(entry)"
+                                            class="ml-2"
+                                            @click="
+                                                (event) =>
+                                                    openUrlActionMenu(
+                                                        event,
+                                                        entry,
+                                                    )
                                             "
-                                            label="Make primary"
-                                            icon="pi pi-star"
-                                            @click="setPrimaryUrl(entry)"
-                                        />
-                                        <PvButton
-                                            size="small"
-                                            severity="danger"
-                                            :loading="
-                                                deletingUrlId === entry.id
-                                            "
-                                            label="Delete"
-                                            icon="pi pi-trash"
-                                            @click="deleteTrackedUrl(entry)"
                                         />
                                     </div>
                                 </td>

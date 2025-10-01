@@ -24,3 +24,5 @@ Adhering to these agreements ensures the migration stays intentional, observable
 
 ## Reference Notes
 - Architecture and domain details: `docs/backend-architecture-blueprint.md`.
+- When performing file discovery, code navigation, or edits, start with the Serena MCP server tools; use raw shell commands only if Serena cannot handle the task.
+- Default to Serena MCP tooling for reading, editing, and file operations across the repo; reach for non-Serena commands only after exhausting the available MCP helpers.

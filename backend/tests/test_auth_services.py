@@ -20,10 +20,8 @@ from app.core.config import Settings
 from app.models import User, UserIdentity
 from app.services.auth import (
     AuthService,
-    DevOIDCProvider,
     OIDCProvider,
     OIDCUserInfo,
-    get_auth_service,
 )
 from app.services.passkeys import (
     AuthenticationVerification,
@@ -241,56 +239,6 @@ def test_auth_service_complete_raises_when_user_missing_id(
     assert exc.value.status_code == 500
 
 
-def test_dev_oidc_provider_behaviour(settings: Settings) -> None:
-    dev_settings = settings.model_copy(
-        update={
-            "base_url": "https://local.test",
-            "environment": "local",
-            "oidc_authorization_endpoint": None,
-            "oidc_token_endpoint": None,
-            "oidc_userinfo_endpoint": None,
-        }
-    )
-    provider = DevOIDCProvider(dev_settings)
-    auth_url = provider.authorization_url(
-        state="state",
-        nonce="nonce",
-        code_challenge="challenge",
-        redirect_uri="https://app/callback",
-        scope="openid",
-    )
-    assert auth_url.startswith("https://local.test/api/auth/oidc/dev/authorize")
-    tokens = provider.exchange_code(
-        code="code", code_verifier="cv", redirect_uri="https://app/callback"
-    )
-    assert tokens["access_token"] == "dev-access-token"
-    info = provider.fetch_userinfo(access_token="ignored")
-    assert info.email == "dev@example.com"
-
-
-def test_get_auth_service_prefers_dev_provider() -> None:
-    auth_services.get_auth_service.cache_clear()
-    previous_env = auth_services.settings.environment
-    previous_auth = auth_services.settings.oidc_authorization_endpoint
-    previous_token = auth_services.settings.oidc_token_endpoint
-    previous_userinfo = auth_services.settings.oidc_userinfo_endpoint
-    try:
-        auth_services.settings.environment = "local"
-        auth_services.settings.oidc_authorization_endpoint = None
-        auth_services.settings.oidc_token_endpoint = None
-        auth_services.settings.oidc_userinfo_endpoint = None
-
-        service = get_auth_service()
-        assert isinstance(service, AuthService)
-        assert isinstance(service._provider, DevOIDCProvider)
-    finally:
-        auth_services.settings.environment = previous_env
-        auth_services.settings.oidc_authorization_endpoint = previous_auth
-        auth_services.settings.oidc_token_endpoint = previous_token
-        auth_services.settings.oidc_userinfo_endpoint = previous_userinfo
-        auth_services.get_auth_service.cache_clear()
-
-
 def test_oidc_provider_authorization_url(settings: Settings) -> None:
     provider = OIDCProvider(settings)
     url = provider.authorization_url(
@@ -315,6 +263,89 @@ def test_oidc_provider_authorization_url_missing_config(settings: Settings) -> N
             scope="openid",
         )
     assert exc.value.status_code == 500
+
+
+def test_oidc_provider_discovers_metadata(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    discovered = {
+        "authorization_endpoint": "https://issuer.example.com/oauth2/auth",
+        "token_endpoint": "https://issuer.example.com/oauth2/token",
+        "userinfo_endpoint": "https://issuer.example.com/oauth2/userinfo",
+        "issuer": "https://issuer.example.com/",
+    }
+
+    class DiscoveryClient:
+        def __enter__(self) -> DiscoveryClient:
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+        def get(self, url: str) -> Any:
+            assert url == "https://issuer.example.com/.well-known/openid-configuration"
+
+            class Response:
+                def raise_for_status(self) -> None:
+                    return None
+
+                def json(self) -> dict[str, Any]:
+                    return discovered
+
+            return Response()
+
+        def post(self, *args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("token exchange should not occur during discovery")
+
+    monkeypatch.setattr(httpx, "Client", lambda *args, **kwargs: DiscoveryClient())
+
+    configured = settings.model_copy(
+        update={
+            "oidc_authorization_endpoint": None,
+            "oidc_token_endpoint": None,
+            "oidc_userinfo_endpoint": None,
+            "oidc_issuer": cast(AnyHttpUrl, "https://issuer.example.com"),
+        }
+    )
+
+    provider = OIDCProvider(configured)
+    url = provider.authorization_url(
+        state="s",
+        nonce="n",
+        code_challenge="c",
+        redirect_uri=str(settings.oidc_redirect_uri),
+        scope="openid",
+    )
+    assert url.startswith("https://issuer.example.com/oauth2/auth")
+
+
+def test_oidc_provider_discovery_failure(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    class FailingClient:
+        def __enter__(self) -> FailingClient:
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+        def get(self, url: str) -> Any:
+            raise httpx.HTTPError("boom")
+
+    monkeypatch.setattr(httpx, "Client", lambda *args, **kwargs: FailingClient())
+
+    configured = settings.model_copy(
+        update={
+            "oidc_authorization_endpoint": None,
+            "oidc_token_endpoint": None,
+            "oidc_userinfo_endpoint": None,
+            "oidc_issuer": cast(AnyHttpUrl, "https://issuer.example.com"),
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        OIDCProvider(configured)
+    assert exc.value.status_code == 502
 
 
 def test_oidc_provider_exchange_code_handles_http_error(
@@ -423,14 +454,12 @@ def test_oidc_provider_fetch_userinfo_requires_endpoint(settings: Settings) -> N
     assert exc.value.status_code == 500
 
 
-def test_passkey_service_requires_verifiers(
+def test_passkey_service_provides_default_verifiers(
     settings: Settings, session: Session
 ) -> None:
     service = PasskeyService(settings=settings)
-    with pytest.raises(HTTPException):
-        service._require_registration_verifier()
-    with pytest.raises(HTTPException):
-        service._require_authentication_verifier()
+    assert callable(service._require_registration_verifier())
+    assert callable(service._require_authentication_verifier())
 
 
 def test_passkey_register_begin_requires_configuration(

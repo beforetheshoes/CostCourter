@@ -22,6 +22,7 @@ from app.models import (
     User,
 )
 from app.services.audit import record_audit_log
+from app.services.notification_preferences import decrypt_secret_value
 
 _logger = structlog.get_logger(__name__)
 
@@ -196,15 +197,30 @@ class NotificationService:
                 email_config = dict(setting.config or {}) if setting else {}
                 yield "email", email_config
 
-        pushover_token = self._settings.notify_pushover_token
-        if pushover_token:
-            setting = settings_by_channel.get("pushover")
-            config_data: dict[str, Any] = dict(setting.config or {}) if setting else {}
-            user_key = (
-                config_data.get("user_key") or self._settings.notify_pushover_user
-            )
-            if user_key and (setting is None or setting.enabled):
-                yield "pushover", {"user_key": user_key, "token": pushover_token}
+        pushover_setting = settings_by_channel.get("pushover")
+        config_data: dict[str, Any] = (
+            dict(pushover_setting.config or {}) if pushover_setting else {}
+        )
+        token = None
+        raw_token = config_data.get("api_token")
+        if isinstance(raw_token, str):
+            token = decrypt_secret_value(raw_token, config=self._settings)
+        if not token:
+            token = self._settings.notify_pushover_token
+
+        user_key = None
+        raw_user_key = config_data.get("user_key")
+        if isinstance(raw_user_key, str):
+            user_key = decrypt_secret_value(raw_user_key, config=self._settings)
+        if not user_key:
+            user_key = self._settings.notify_pushover_user
+
+        if (
+            token
+            and user_key
+            and (pushover_setting is None or pushover_setting.enabled)
+        ):
+            yield "pushover", {"user_key": user_key, "token": token}
 
         gotify_url = self._settings.notify_gotify_url
         gotify_token = self._settings.notify_gotify_token
@@ -218,6 +234,45 @@ class NotificationService:
             setting = settings_by_channel.get("apprise")
             if setting is None or setting.enabled:
                 yield "apprise", {"config_path": apprise_path}
+
+    def _resolve_channel_config(
+        self,
+        session: Session,
+        user: User,
+        channel: str,
+    ) -> dict[str, Any] | None:
+        for resolved_channel, config in self._resolve_channels(session, user):
+            if resolved_channel == channel:
+                return config
+        return None
+
+    def send_channel_test(
+        self,
+        session: Session,
+        *,
+        user: User,
+        channel: str,
+    ) -> bool:
+        config = self._resolve_channel_config(session, user, channel)
+        if config is None:
+            return False
+
+        payload = PriceAlertPayload(
+            title=f"{self._settings.app_name} notification test",
+            summary="This is a test notification from CostCourter.",
+            product_url=None,
+            price=0.0,
+            currency=None,
+            store_name=None,
+        )
+        self._dispatch_channel(
+            channel,
+            user,
+            payload,
+            config=config,
+            template="system",
+        )
+        return True
 
     def send_system_alert(
         self,

@@ -126,8 +126,25 @@ class PasskeyService:
         challenge_generator: Callable[[], bytes] | None = None,
     ) -> None:
         self._settings = settings
-        self._registration_verifier = registration_verifier
-        self._authentication_verifier = authentication_verifier
+        self._registration_verifier: PasskeyRegistrationVerifier | None
+        if registration_verifier is None:
+            from app.services.passkeys_webauthn import WebAuthnRegistrationVerifier
+
+            self._registration_verifier = WebAuthnRegistrationVerifier(
+                settings=settings
+            )
+        else:
+            self._registration_verifier = registration_verifier
+
+        self._authentication_verifier: PasskeyAuthenticationVerifier | None
+        if authentication_verifier is None:
+            from app.services.passkeys_webauthn import WebAuthnAuthenticationVerifier
+
+            self._authentication_verifier = WebAuthnAuthenticationVerifier(
+                settings=settings
+            )
+        else:
+            self._authentication_verifier = authentication_verifier
         self._challenge_generator = challenge_generator or (
             lambda: secrets.token_bytes(32)
         )
@@ -170,7 +187,7 @@ class PasskeyService:
             },
         )
         user_display = full_name or email
-        options = {
+        options: dict[str, Any] = {
             "challenge": _urlsafe_b64encode(challenge),
             "rp": {"id": rp_id, "name": rp_name},
             "user": {
@@ -183,6 +200,13 @@ class PasskeyService:
                 {"type": "public-key", "alg": -257},
             ],
             "timeout": self._settings.passkey_timeout_ms,
+            "authenticatorSelection": {
+                "residentKey": "required",
+                "requireResidentKey": True,
+                "userVerification": "preferred",
+            },
+            "attestation": "none",
+            "extensions": {"credProps": True},
         }
         return PasskeyRegistrationBegin(state=state, options=options)
 
@@ -205,7 +229,7 @@ class PasskeyService:
         origin = self._settings.passkey_origin
         assert rp_id is not None  # safeguarded earlier
         assert origin is not None
-        origin_str = str(origin)
+        origin_str = str(origin).rstrip("/")
         verification = verifier(
             credential,
             expected_challenge=challenge_bytes,
@@ -270,47 +294,48 @@ class PasskeyService:
         token = issue_access_token(self._settings, user_id=user.id)
         return TokenResult(access_token=token)
 
-    def assert_begin(self, session: Session, *, email: str) -> PasskeyAssertionBegin:
-        user = session.exec(select(User).where(User.email == email)).first()
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found",
-            )
-        if user.id is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="User missing identifier",
-            )
-        credentials = session.exec(
-            select(PasskeyCredential).where(PasskeyCredential.user_id == user.id)
-        ).all()
-        if not credentials:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User has no registered passkeys",
-            )
+    def assert_begin(
+        self, session: Session, *, email: str | None
+    ) -> PasskeyAssertionBegin:
         challenge = self._challenge_generator()
-        state = _encode_state(
-            self._settings,
-            {
-                "type": "passkey-assert",
-                "challenge": _urlsafe_b64encode(challenge),
-                "user_id": user.id,
-            },
-        )
-        allow = []
-        for credential in credentials:
-            transports = (
-                credential.transports.split(",") if credential.transports else None
-            )
-            allow.append(
-                {
-                    "type": "public-key",
-                    "id": credential.credential_id,
-                    "transports": transports,
-                }
-            )
+        state_payload: dict[str, Any] = {
+            "type": "passkey-assert",
+            "challenge": _urlsafe_b64encode(challenge),
+        }
+        allow: list[dict[str, Any]] = []
+
+        if email:
+            user = session.exec(select(User).where(User.email == email)).first()
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found",
+                )
+            if user.id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="User missing identifier",
+                )
+            credentials = session.exec(
+                select(PasskeyCredential).where(PasskeyCredential.user_id == user.id)
+            ).all()
+            if not credentials:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="User has no registered passkeys",
+                )
+            state_payload["user_id"] = user.id
+            for credential in credentials:
+                transports = (
+                    credential.transports.split(",") if credential.transports else None
+                )
+                allow.append(
+                    {
+                        "type": "public-key",
+                        "id": credential.credential_id,
+                        "transports": transports,
+                    }
+                )
         options = {
             "challenge": _urlsafe_b64encode(challenge),
             "rpId": self._settings.passkey_relying_party_id,
@@ -318,6 +343,7 @@ class PasskeyService:
             "timeout": self._settings.passkey_timeout_ms,
             "userVerification": "preferred",
         }
+        state = _encode_state(self._settings, state_payload)
         return PasskeyAssertionBegin(state=state, options=options)
 
     def assert_complete(
@@ -348,8 +374,9 @@ class PasskeyService:
         verifier = self._require_authentication_verifier()
         rp_id = self._settings.passkey_relying_party_id
         origin = self._settings.passkey_origin
-        assert rp_id is not None and origin is not None
-        origin_str = str(origin)
+        assert rp_id is not None  # safeguarded earlier
+        assert origin is not None
+        origin_str = str(origin).rstrip("/")
         verification = verifier(
             credential,
             expected_challenge=challenge,
@@ -358,20 +385,16 @@ class PasskeyService:
             expected_rp_id=rp_id,
         )
         record.sign_count = verification.new_sign_count
-        record.backup_state = verification.backup_state
         record.backup_eligible = verification.backup_eligible
+        record.backup_state = verification.backup_state
         record.last_used_at = utcnow()
+        record.updated_at = utcnow()
         session.add(record)
-        user = session.get(User, record.user_id)
-        if user is None:
+        user = record.user
+        if user is None or user.id is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Credential references missing user",
-            )
-        if user.id is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="User missing identifier",
+                detail="Passkey credential missing user binding",
             )
         user.last_login_at = utcnow()
         session.add(user)

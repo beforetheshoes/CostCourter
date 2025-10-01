@@ -58,3 +58,4 @@ scratch/
 redisdata/
 pgdata/
 mysql/
+.serena/*

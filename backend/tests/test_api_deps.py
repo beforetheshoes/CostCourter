@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 
 import httpx
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.api.deps as api_deps
 import app.models as models
-from app.core.config import settings
 
 
 @pytest.fixture(name="engine")
@@ -79,129 +76,13 @@ def test_require_roles_accepts_matching_role(engine: Engine) -> None:
         assert resolved is user
 
 
-def test_get_current_user_returns_synthetic_when_bypassed(engine: Engine) -> None:
-    previous = settings.auth_bypass
-    settings.auth_bypass = True
-    try:
-        with Session(engine) as session:
-            user = api_deps.get_current_user(credentials=None, session=session)
-            assert user.is_superuser is True
-            assert user.email == "dev@example.com"
-            persisted = session.get(models.User, user.id)
-            assert persisted is not None
-            assert persisted.is_superuser is True
-    finally:
-        settings.auth_bypass = previous
-
-
-def test_get_current_user_handles_duplicate_creation_race(engine: Engine) -> None:
-    previous = settings.auth_bypass
-    settings.auth_bypass = True
-    try:
-
-        def resolve() -> models.User:
-            with Session(engine) as session:
-                return api_deps.get_current_user(credentials=None, session=session)
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(lambda _: resolve(), range(2)))
-
-        assert all(user.email == "dev@example.com" for user in results)
-
-        with Session(engine) as session:
-            users = session.exec(select(models.User)).all()
-            assert len(users) == 1
-    finally:
-        settings.auth_bypass = previous
-
-
-def test_get_current_user_raises_when_provisioning_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _EmptyResult:
-        def first(self) -> Any:
-            return None
-
-    class _Session:
-        def __init__(self) -> None:
-            self.attempts = 0
-
-        def exec(self, statement: Any) -> _EmptyResult:
-            _ = statement
-            self.attempts += 1
-            return _EmptyResult()
-
-        def add(self, obj: Any) -> None:
-            self._last_added = obj
-
-        def commit(self) -> None:
-            return None
-
-        def rollback(self) -> None:
-            return None
-
-    previous = settings.auth_bypass
-    settings.auth_bypass = True
-    session: Any = _Session()
-    try:
-        with pytest.raises(RuntimeError, match="Failed to provision bypass user"):
+def test_get_current_user_requires_credentials(engine: Engine) -> None:
+    with Session(engine) as session:
+        with pytest.raises(HTTPException) as exc:
             api_deps.get_current_user(credentials=None, session=session)
-        assert session.attempts == 10
-    finally:
-        settings.auth_bypass = previous
 
-
-def test_get_current_user_retries_transient_commit_errors() -> None:
-    class _User:
-        def __init__(self, user_id: int) -> None:
-            self.id = user_id
-
-    class _Result:
-        def __init__(self, value: Any) -> None:
-            self._value = value
-
-        def first(self) -> Any:
-            return self._value
-
-    class _Session:
-        def __init__(self) -> None:
-            self.exec_calls = 0
-            self.commit_calls = 0
-            self.rollback_calls = 0
-            self._user = _User(1)
-            self._persisted = False
-
-        def exec(self, statement: Any) -> _Result:
-            _ = statement
-            self.exec_calls += 1
-            if not self._persisted:
-                return _Result(None)
-            return _Result(self._user)
-
-        def add(self, obj: Any) -> None:
-            self._user = obj
-
-        def commit(self) -> None:
-            from sqlalchemy.exc import InterfaceError
-
-            self.commit_calls += 1
-            if self.commit_calls == 1:
-                raise InterfaceError("stmt", "params", RuntimeError("boom"))
-            self._persisted = True
-
-        def rollback(self) -> None:
-            self.rollback_calls += 1
-
-    previous = settings.auth_bypass
-    settings.auth_bypass = True
-    session: Any = _Session()
-    try:
-        user = api_deps.get_current_user(credentials=None, session=session)
-        assert user is session._user
-        assert session.commit_calls == 2
-        assert session.rollback_calls == 1
-    finally:
-        settings.auth_bypass = previous
+    assert exc.value.status_code == 401
+    assert "Missing Authorization" in exc.value.detail
 
 
 def test_get_scraper_client_factory_returns_http_client() -> None:

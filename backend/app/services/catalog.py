@@ -33,7 +33,9 @@ from app.schemas import (
     ProductRead,
     ProductUpdate,
     ProductURLCreate,
+    ProductURLMetadata,
     ProductURLRead,
+    ProductURLRefreshResponse,
     ProductURLUpdate,
     StoreCreate,
     StoreRead,
@@ -47,6 +49,10 @@ from app.schemas import (
 )
 from app.services.audit import record_audit_log
 from app.services.price_cache import rebuild_product_price_cache
+from app.services.product_quick_add import (
+    HttpClientFactory,
+    fetch_url_metadata,
+)
 
 
 def _get_user_attr(user: User, attribute: str, default: Any = None) -> Any:
@@ -114,6 +120,13 @@ def _ensure_owned(entity_user_id: int, user: User) -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resource not found",
         )
+
+
+def _normalize_optional_str(value: Any) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
 
 
 def create_store(session: Session, payload: StoreCreate, *, owner: User) -> StoreRead:
@@ -1238,6 +1251,90 @@ def update_product_url(
     if resolved_store is None:
         resolved_store = product_url.store
     return _build_product_url_read_from_instance(product_url, resolved_store)
+
+
+def refresh_product_url_metadata(
+    session: Session,
+    *,
+    owner: User,
+    product_url_id: int,
+    scraper_base_url: str | None,
+    http_client_factory: HttpClientFactory | None,
+) -> ProductURLRefreshResponse:
+    product_url = _load_product_url(session, owner, product_url_id)
+    product = session.get(Product, product_url.product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    diagnostics: list[str] = []
+    raw_metadata = fetch_url_metadata(
+        product_url.url,
+        scraper_base_url,
+        http_client_factory,
+        diagnostics=diagnostics,
+    )
+    metadata_payload = dict(raw_metadata)
+    metadata_payload.pop("raw_html", None)
+
+    metadata_kwargs: dict[str, Any] = {}
+    for key in ("title", "description", "image", "locale"):
+        value = _normalize_optional_str(metadata_payload.get(key))
+        if value is not None:
+            metadata_kwargs[key] = value
+
+    price_value = metadata_payload.get("price")
+    if price_value is not None:
+        normalized_price = _normalize_optional_str(str(price_value))
+        if normalized_price is not None:
+            metadata_kwargs["price"] = normalized_price
+
+    currency_value = metadata_payload.get("currency")
+    if currency_value is not None:
+        normalized_currency = _normalize_optional_str(str(currency_value))
+        if normalized_currency is not None:
+            metadata_kwargs["currency"] = normalized_currency.upper()
+
+    metadata_model = ProductURLMetadata(**metadata_kwargs)
+
+    name_updated = False
+    image_updated = False
+
+    new_name = metadata_model.title
+    if new_name and new_name != product.name:
+        product.name = new_name
+        name_updated = True
+
+    new_image = metadata_model.image
+    if new_image and new_image != (product.image_url or ""):
+        product.image_url = new_image
+        image_updated = True
+
+    if name_updated or image_updated:
+        session.add(product)
+        session.commit()
+        session.refresh(product)
+    else:
+        session.rollback()
+
+    if product_url.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Product URL missing identifier",
+        )
+
+    return ProductURLRefreshResponse(
+        product_id=product_url.product_id,
+        product_url_id=product_url.id,
+        metadata=metadata_model,
+        applied_name=product.name,
+        applied_image_url=product.image_url,
+        name_updated=name_updated,
+        image_updated=image_updated,
+        warnings=diagnostics,
+    )
 
 
 def delete_product_url(session: Session, product_url_id: int, *, owner: User) -> None:

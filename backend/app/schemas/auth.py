@@ -67,7 +67,7 @@ class PasskeyRegisterCompleteRequest(BaseModel):
 
 
 class PasskeyAssertBeginRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr | None = None
 
 
 class PasskeyAssertionOptions(BaseModel):

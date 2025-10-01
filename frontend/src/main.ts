@@ -17,6 +17,8 @@ import Badge from 'primevue/badge'
 import Divider from 'primevue/divider'
 import Skeleton from 'primevue/skeleton'
 import SelectButton from 'primevue/selectbutton'
+import Menu from 'primevue/menu'
+import MultiSelect from 'primevue/multiselect'
 
 import 'primeicons/primeicons.css'
 import './style.css'
@@ -64,6 +66,8 @@ app.component('PvBadge', Badge)
 app.component('PvDivider', Divider)
 app.component('PvSkeleton', Skeleton)
 app.component('PvSelectButton', SelectButton)
+app.component('PvMenu', Menu)
+app.component('PvMultiSelect', MultiSelect)
 
 registerAuthInterceptor()
 

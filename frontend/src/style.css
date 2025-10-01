@@ -41,10 +41,26 @@
         var(--p-surface-950, #020617) 85%,
         var(--p-surface-900, #0f172a)
     );
-    --app-chart-accent-1: color-mix(in srgb, var(--p-primary-200, #c7d2fe) 85%, transparent);
-    --app-chart-accent-2: color-mix(in srgb, var(--p-primary-300, #a5b4fc) 85%, transparent);
-    --app-chart-accent-3: color-mix(in srgb, var(--p-primary-100, #e0e7ff) 82%, transparent);
-    --app-chart-accent-4: color-mix(in srgb, var(--app-accent-secondary, #38bdf8) 80%, transparent);
+    --app-chart-accent-1: color-mix(
+        in srgb,
+        var(--p-primary-200, #c7d2fe) 85%,
+        transparent
+    );
+    --app-chart-accent-2: color-mix(
+        in srgb,
+        var(--p-primary-300, #a5b4fc) 85%,
+        transparent
+    );
+    --app-chart-accent-3: color-mix(
+        in srgb,
+        var(--p-primary-100, #e0e7ff) 82%,
+        transparent
+    );
+    --app-chart-accent-4: color-mix(
+        in srgb,
+        var(--app-accent-secondary, #38bdf8) 80%,
+        transparent
+    );
     --app-chart-accent-5: color-mix(in srgb, #f97316 80%, transparent);
     --app-chart-accent-6: color-mix(in srgb, #fb923c 80%, transparent);
     --app-chart-accent-7: color-mix(in srgb, #f472b6 75%, transparent);
@@ -83,14 +99,32 @@
         background:
             radial-gradient(
                 circle at top left,
-                color-mix(in srgb, var(--p-primary-400, #818cf8) 30%, transparent),
-                color-mix(in srgb, var(--p-primary-200, #c7d2fe) 12%, transparent) 45%,
+                color-mix(
+                    in srgb,
+                    var(--p-primary-400, #818cf8) 30%,
+                    transparent
+                ),
+                color-mix(
+                        in srgb,
+                        var(--p-primary-200, #c7d2fe) 12%,
+                        transparent
+                    )
+                    45%,
                 transparent 70%
             ),
             radial-gradient(
                 circle at bottom right,
-                color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 24%, transparent),
-                color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 12%, transparent) 55%,
+                color-mix(
+                    in srgb,
+                    var(--app-accent-secondary, #22d3ee) 24%,
+                    transparent
+                ),
+                color-mix(
+                        in srgb,
+                        var(--app-accent-secondary, #22d3ee) 12%,
+                        transparent
+                    )
+                    55%,
                 transparent 80%
             ),
             var(--app-ambient-base, #f8f9ff);
@@ -105,14 +139,32 @@
         background:
             radial-gradient(
                 circle at top left,
-                color-mix(in srgb, var(--p-primary-700, #4338ca) 35%, transparent),
-                color-mix(in srgb, var(--p-primary-600, #4f46e5) 18%, transparent) 45%,
+                color-mix(
+                    in srgb,
+                    var(--p-primary-700, #4338ca) 35%,
+                    transparent
+                ),
+                color-mix(
+                        in srgb,
+                        var(--p-primary-600, #4f46e5) 18%,
+                        transparent
+                    )
+                    45%,
                 transparent 70%
             ),
             radial-gradient(
                 circle at bottom right,
-                color-mix(in srgb, var(--app-accent-secondary, #38bdf8) 28%, transparent),
-                color-mix(in srgb, var(--app-accent-secondary, #38bdf8) 15%, transparent) 55%,
+                color-mix(
+                    in srgb,
+                    var(--app-accent-secondary, #38bdf8) 28%,
+                    transparent
+                ),
+                color-mix(
+                        in srgb,
+                        var(--app-accent-secondary, #38bdf8) 15%,
+                        transparent
+                    )
+                    55%,
                 transparent 80%
             ),
             var(--app-ambient-base, #0f172a);
@@ -161,11 +213,7 @@
 }
 
 :root[data-theme='dark'][data-brand-theme='lagoon'] {
-    --app-ambient-base: color-mix(
-        in srgb,
-        #042f2e 88%,
-        #082f49
-    );
+    --app-ambient-base: color-mix(in srgb, #042f2e 88%, #082f49);
     --app-chart-accent-1: color-mix(in srgb, #14b8a6 82%, transparent);
     --app-chart-accent-2: color-mix(in srgb, #38bdf8 80%, transparent);
     --app-chart-accent-3: color-mix(in srgb, #0ea5e9 78%, transparent);
@@ -180,11 +228,7 @@
 }
 
 :root[data-theme='dark'][data-brand-theme='ember'] {
-    --app-ambient-base: color-mix(
-        in srgb,
-        #431407 82%,
-        #3f2116
-    );
+    --app-ambient-base: color-mix(in srgb, #431407 82%, #3f2116);
     --app-chart-accent-1: color-mix(in srgb, #f97316 82%, transparent);
     --app-chart-accent-2: color-mix(in srgb, #fb923c 80%, transparent);
     --app-chart-accent-3: color-mix(in srgb, #facc15 80%, transparent);
@@ -227,8 +271,10 @@
         left: max(-18rem, -20vw);
         background: radial-gradient(
             circle at center,
-            color-mix(in srgb, var(--p-primary-500, #6366f1) 45%, transparent) 0%,
-            color-mix(in srgb, var(--p-primary-600, #4f46e5) 25%, transparent) 45%,
+            color-mix(in srgb, var(--p-primary-500, #6366f1) 45%, transparent)
+                0%,
+            color-mix(in srgb, var(--p-primary-600, #4f46e5) 25%, transparent)
+                45%,
             transparent 70%
         );
     }
@@ -238,8 +284,18 @@
         right: max(-16rem, -20vw);
         background: radial-gradient(
             circle at center,
-            color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 38%, transparent) 0%,
-            color-mix(in srgb, var(--app-accent-secondary, #22d3ee) 16%, transparent) 45%,
+            color-mix(
+                    in srgb,
+                    var(--app-accent-secondary, #22d3ee) 38%,
+                    transparent
+                )
+                0%,
+            color-mix(
+                    in srgb,
+                    var(--app-accent-secondary, #22d3ee) 16%,
+                    transparent
+                )
+                45%,
             transparent 70%
         );
     }
@@ -298,7 +354,11 @@
             transparent
         );
         box-shadow: 0 15px 40px -25px
-            color-mix(in srgb, var(--p-primary-600, #4f46e5) 55%, rgba(15, 23, 42, 0.35));
+            color-mix(
+                in srgb,
+                var(--p-primary-600, #4f46e5) 55%,
+                rgba(15, 23, 42, 0.35)
+            );
     }
 
     html[data-theme='dark'] .nav-link--idle {
@@ -322,7 +382,11 @@
             transparent
         );
         box-shadow: 0 18px 46px -28px
-            color-mix(in srgb, var(--p-primary-900, #312e81) 65%, rgba(2, 6, 23, 0.4));
+            color-mix(
+                in srgb,
+                var(--p-primary-900, #312e81) 65%,
+                rgba(2, 6, 23, 0.4)
+            );
     }
 
     .dashboard-card {
@@ -332,7 +396,11 @@
         background-color: rgba(255, 255, 255, 0.85);
         backdrop-filter: blur(18px);
         box-shadow: 0 22px 55px -35px
-            color-mix(in srgb, var(--p-primary-600, #4f46e5) 45%, rgba(15, 23, 42, 0.4));
+            color-mix(
+                in srgb,
+                var(--p-primary-600, #4f46e5) 45%,
+                rgba(15, 23, 42, 0.4)
+            );
     }
 
     .product-card {
@@ -348,12 +416,20 @@
         border-color: rgba(148, 163, 184, 0.28);
         background-color: rgba(15, 23, 42, 0.76);
         box-shadow: 0 26px 55px -30px
-            color-mix(in srgb, var(--p-primary-900, #312e81) 55%, rgba(2, 6, 23, 0.65));
+            color-mix(
+                in srgb,
+                var(--p-primary-900, #312e81) 55%,
+                rgba(2, 6, 23, 0.65)
+            );
     }
 
     html[data-theme='dark'] .product-card {
         border-color: rgba(148, 163, 184, 0.26);
-        background-color: color-mix(in srgb, var(--p-surface-900, #0f172a) 85%, transparent);
+        background-color: color-mix(
+            in srgb,
+            var(--p-surface-900, #0f172a) 85%,
+            transparent
+        );
         box-shadow: 0 22px 45px -30px rgba(2, 6, 23, 0.65);
     }
 

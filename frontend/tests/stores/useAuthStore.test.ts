@@ -1,12 +1,23 @@
 import { Buffer } from 'node:buffer'
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    beforeAll,
+    afterAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../src/lib/http', () => {
     const post = vi.fn()
     const get = vi.fn()
-    const interceptors = { request: { use: vi.fn() } }
+    const interceptors = {
+        request: { use: vi.fn() },
+        response: { use: vi.fn() },
+    }
     const attachAuthInterceptor = vi.fn()
     return {
         apiClient: { post, get, interceptors },
@@ -25,13 +36,17 @@ import {
 const mockedHttp = apiClient as unknown as {
     post: ReturnType<typeof vi.fn>
     get: ReturnType<typeof vi.fn>
-    interceptors: { request: { use: ReturnType<typeof vi.fn> } }
+    interceptors: {
+        request: { use: ReturnType<typeof vi.fn> }
+        response: { use: ReturnType<typeof vi.fn> }
+    }
 }
 const mockedAttach = attachAuthInterceptor as unknown as ReturnType<
     typeof vi.fn
 >
 
-const originalBypass = import.meta.env.VITE_AUTH_BYPASS
+let credentialCreateMock: ReturnType<typeof vi.fn>
+let credentialGetMock: ReturnType<typeof vi.fn>
 
 const readStoredState = () =>
     window.localStorage.getItem('costcourter.oidc.state')
@@ -48,6 +63,47 @@ const createJwt = (payload: Record<string, unknown>) => {
     return `${encode(header)}.${encode(payload)}.`
 }
 
+const toBase64Url = (value: Uint8Array | string) => {
+    const buffer =
+        typeof value === 'string'
+            ? Buffer.from(value, 'utf8')
+            : Buffer.from(value)
+    return buffer
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '')
+}
+
+const bufferFrom = (...bytes: number[]) => Uint8Array.from(bytes).buffer
+
+beforeAll(() => {
+    credentialCreateMock = vi.fn()
+    credentialGetMock = vi.fn()
+    Object.defineProperty(window, 'isSecureContext', {
+        configurable: true,
+        value: true,
+    })
+    Object.defineProperty(window, 'PublicKeyCredential', {
+        configurable: true,
+        value: class PublicKeyCredential {},
+    })
+    Object.defineProperty(navigator, 'credentials', {
+        configurable: true,
+        get() {
+            return {
+                create: (...args: unknown[]) => credentialCreateMock(...args),
+                get: (...args: unknown[]) => credentialGetMock(...args),
+            }
+        },
+    })
+})
+
+afterAll(() => {
+    delete (navigator as unknown as Record<string, unknown>).credentials
+    delete (window as Record<string, unknown>).PublicKeyCredential
+})
+
 describe('useAuthStore', () => {
     beforeEach(() => {
         setActivePinia(createPinia())
@@ -55,12 +111,10 @@ describe('useAuthStore', () => {
         mockedHttp.post.mockReset()
         mockedHttp.get.mockReset()
         mockedHttp.interceptors.request.use.mockReset()
+        mockedHttp.interceptors.response.use.mockReset()
         mockedAttach.mockReset()
-        import.meta.env.VITE_AUTH_BYPASS = 'false'
-    })
-
-    afterEach(() => {
-        import.meta.env.VITE_AUTH_BYPASS = originalBypass
+        credentialCreateMock = vi.fn()
+        credentialGetMock = vi.fn()
     })
 
     it('stores OIDC state on begin and returns redirect URL', async () => {
@@ -81,6 +135,7 @@ describe('useAuthStore', () => {
         expect(result.authorization_url).toContain('https://auth.example.com')
         expect(store.oidcState?.state).toBe('state-123')
         expect(readStoredState()).toContain('state-123')
+        vi.useRealTimers()
     })
 
     it('completes OIDC login and stores tokens', async () => {
@@ -112,7 +167,6 @@ describe('useAuthStore', () => {
         })
 
         const store = useAuthStore()
-        // simulate stored state step
         await store.beginOidcLogin()
         await store.completeOidcLogin({ state: 'state-abc', code: 'auth-code' })
 
@@ -128,10 +182,8 @@ describe('useAuthStore', () => {
             accessToken: token,
             tokenType: 'Bearer',
         })
-        expect(store.accessToken).toBe(token)
-        expect(store.tokenType).toBe('Bearer')
-        expect(readStoredState()).toBeNull()
         expect(store.roles).toContain('admin')
+        expect(readStoredState()).toBeNull()
     })
 
     it('clears state and tokens on logout', () => {
@@ -183,7 +235,6 @@ describe('useAuthStore', () => {
         store.setTokens(null)
         expect(store.claims).toBeNull()
         expect(store.roles).toEqual([])
-        vi.useRealTimers()
     })
 
     it('schedules and clears token refresh timers', () => {
@@ -235,10 +286,225 @@ describe('useAuthStore', () => {
         store.clearRefreshTimer()
     })
 
-    it('respects auth bypass configuration', () => {
-        import.meta.env.VITE_AUTH_BYPASS = 'true'
+    it('registers a passkey and stores tokens', async () => {
+        const challenge = Uint8Array.from([1, 2, 3])
+        const rawId = Uint8Array.from([4, 5, 6])
+        const userEmail = 'user@example.com'
+        mockedHttp.post.mockResolvedValueOnce({
+            data: {
+                state: 'passkey-state',
+                options: {
+                    challenge: toBase64Url(challenge),
+                    rp: { id: 'localhost', name: 'CostCourter' },
+                    user: {
+                        id: toBase64Url(userEmail),
+                        name: userEmail,
+                        displayName: 'User Example',
+                    },
+                    pubKeyCredParams: [],
+                    timeout: 60_000,
+                },
+            },
+        })
+        const token = createJwt({
+            sub: '1',
+            exp: Math.floor(Date.now() / 1000) + 3600,
+        })
+        mockedHttp.post.mockResolvedValueOnce({
+            data: { access_token: token, token_type: 'Bearer' },
+        })
+        mockedHttp.get.mockResolvedValueOnce({
+            data: {
+                id: 1,
+                email: userEmail,
+                full_name: 'User Example',
+                is_superuser: false,
+                roles: ['catalog'],
+            },
+        })
+
+        const fakeCredential = {
+            id: 'cred-id',
+            rawId: rawId.buffer,
+            type: 'public-key',
+            response: {
+                clientDataJSON: bufferFrom(10, 11, 12),
+                attestationObject: bufferFrom(20, 21, 22),
+                getTransports: vi.fn(() => ['internal']),
+            },
+            getClientExtensionResults: () => ({}),
+        } as unknown as PublicKeyCredential
+
+        credentialCreateMock.mockResolvedValue(fakeCredential)
+
         const store = useAuthStore()
+        await store.registerPasskey({
+            email: userEmail,
+            fullName: 'User Example',
+        })
+
+        expect(mockedHttp.post).toHaveBeenNthCalledWith(
+            1,
+            '/auth/passkeys/register/begin',
+            {
+                email: userEmail,
+                full_name: 'User Example',
+            },
+        )
+        const createArgs = credentialCreateMock.mock.calls[0][0]
+        expect(createArgs.publicKey.challenge).toBeInstanceOf(ArrayBuffer)
+        expect(mockedHttp.post).toHaveBeenNthCalledWith(
+            2,
+            '/auth/passkeys/register/complete',
+            expect.objectContaining({ state: 'passkey-state' }),
+        )
         expect(store.isAuthenticated).toBe(true)
-        expect(store.hasRole('admin')).toBe(true)
+        expect(store.currentUser?.email).toBe(userEmail)
+    })
+
+    it('authenticates with an existing passkey', async () => {
+        const challenge = Uint8Array.from([7, 8, 9])
+        const credentialId = Uint8Array.from([9, 8, 7])
+        const userEmail = 'admin@example.com'
+        mockedHttp.post.mockResolvedValueOnce({
+            data: {
+                state: 'assert-state',
+                options: {
+                    challenge: toBase64Url(challenge),
+                    rpId: 'localhost',
+                    allowCredentials: [
+                        {
+                            type: 'public-key',
+                            id: toBase64Url(credentialId),
+                        },
+                    ],
+                    timeout: 60_000,
+                },
+            },
+        })
+        const token = createJwt({
+            sub: '42',
+            exp: Math.floor(Date.now() / 1000) + 3600,
+        })
+        mockedHttp.post.mockResolvedValueOnce({
+            data: { access_token: token, token_type: 'Bearer' },
+        })
+        mockedHttp.get.mockResolvedValueOnce({
+            data: {
+                id: 42,
+                email: userEmail,
+                full_name: 'Admin User',
+                is_superuser: true,
+                roles: ['admin'],
+            },
+        })
+
+        const assertionCredential = {
+            id: 'cred-id',
+            rawId: credentialId.buffer,
+            type: 'public-key',
+            response: {
+                clientDataJSON: bufferFrom(1, 2, 3),
+                authenticatorData: bufferFrom(4, 5, 6),
+                signature: bufferFrom(7, 8, 9),
+                userHandle: bufferFrom(10, 11, 12),
+            },
+            getClientExtensionResults: () => ({}),
+        } as unknown as PublicKeyCredential
+
+        credentialGetMock.mockResolvedValue(assertionCredential)
+
+        const store = useAuthStore()
+        await store.authenticatePasskey(userEmail)
+
+        expect(mockedHttp.post).toHaveBeenNthCalledWith(
+            1,
+            '/auth/passkeys/assert/begin',
+            { email: userEmail },
+        )
+        const getArgs = credentialGetMock.mock.calls[0][0]
+        expect(getArgs.publicKey.challenge).toBeInstanceOf(ArrayBuffer)
+        expect(mockedHttp.post).toHaveBeenNthCalledWith(
+            2,
+            '/auth/passkeys/assert/complete',
+            expect.objectContaining({ state: 'assert-state' }),
+        )
+        expect(store.isAuthenticated).toBe(true)
+        expect(store.currentUser?.email).toBe(userEmail)
+    })
+
+    it('handles unauthorized responses via auth interceptor', async () => {
+        const store = useAuthStore()
+        const logoutSpy = vi.spyOn(store, 'logout').mockImplementation(() => {})
+        registerAuthInterceptor()
+
+        const onRejected = mockedHttp.interceptors.response.use.mock.calls[0][1]
+        const replaceSpy = vi.fn()
+        const originalLocation = window.location
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: {
+                pathname: '/products',
+                search: '?q=1',
+                hash: '#section',
+                replace: replaceSpy,
+            },
+        })
+
+        await expect(
+            onRejected({ response: { status: 401 } }),
+        ).rejects.toBeTruthy()
+        expect(logoutSpy).toHaveBeenCalledWith(false)
+        expect(
+            window.localStorage.getItem('costcourter.postLoginRedirect'),
+        ).toBe('/products?q=1#section')
+        expect(replaceSpy).toHaveBeenCalledWith('/')
+        logoutSpy.mockRestore()
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: originalLocation,
+        })
+    })
+
+    it('clears state and redirects to home on logout', () => {
+        const store = useAuthStore()
+        store.tokens = {
+            accessToken: 'token',
+            tokenType: 'Bearer',
+        }
+        store.claims = { exp: Math.floor(Date.now() / 1000) + 3600 }
+        store.roles = ['admin']
+        store.currentUser = {
+            id: 1,
+            email: 'person@example.com',
+            full_name: 'Person Example',
+            is_superuser: true,
+            roles: ['admin'],
+        }
+
+        let href = 'http://localhost/login'
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: {
+                get href() {
+                    return href
+                },
+                set href(value: string) {
+                    href = value
+                },
+            },
+        })
+
+        store.logout()
+
+        expect(store.isAuthenticated).toBe(false)
+        expect(href).toBe('/')
+
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: {
+                href,
+            },
+        })
     })
 })

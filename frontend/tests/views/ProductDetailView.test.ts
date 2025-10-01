@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, h } from 'vue'
 import { fireEvent, render, waitFor, within } from '@testing-library/vue'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -69,6 +70,82 @@ const CheckboxStub = {
     template:
         '<input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
 }
+
+type MenuStubItem = {
+    label: string
+    command?: () => void
+    disabled?: boolean
+}
+
+const MultiSelectStub = defineComponent({
+    name: 'PvMultiSelectStub',
+    props: {
+        modelValue: { type: Array, default: () => [] },
+        options: { type: Array, default: () => [] },
+        optionLabel: { type: String, default: 'label' },
+        optionValue: { type: String, default: 'value' },
+    },
+    emits: ['update:modelValue'],
+    setup(props, { emit }) {
+        return () =>
+            h(
+                'select',
+                {
+                    multiple: true,
+                    value: props.modelValue.map((value) => String(value)),
+                    onChange: (event: Event) => {
+                        const target = event.target as HTMLSelectElement
+                        const values = Array.from(target.selectedOptions).map(
+                            (option) => {
+                                const parsed = Number(option.value)
+                                return Number.isNaN(parsed)
+                                    ? option.value
+                                    : parsed
+                            },
+                        )
+                        emit('update:modelValue', values)
+                    },
+                },
+                props.options.map((option: Record<string, unknown>, index) =>
+                    h(
+                        'option',
+                        {
+                            key: index,
+                            value: String(option[props.optionValue] ?? ''),
+                        },
+                        String(option[props.optionLabel] ?? option),
+                    ),
+                ),
+            )
+    },
+})
+
+const MenuStub = defineComponent({
+    name: 'PvMenuStub',
+    props: {
+        model: { type: Array, default: () => [] },
+        popup: { type: Boolean, default: false },
+    },
+    setup(props) {
+        return () =>
+            h(
+                'div',
+                { class: 'pv-menu' },
+                props.model.map((item: MenuStubItem, index: number) =>
+                    h(
+                        'button',
+                        {
+                            type: 'button',
+                            onClick: () => item.command && item.command(),
+                            disabled: item.disabled,
+                            'data-index': index,
+                        },
+                        item.label,
+                    ),
+                ),
+            )
+    },
+})
 
 describe('ProductDetailView', () => {
     beforeEach(() => {
@@ -223,6 +300,8 @@ describe('ProductDetailView', () => {
                     PvButton: ButtonStub,
                     PvInputText: InputTextStub,
                     PvCheckbox: CheckboxStub,
+                    PvMultiSelect: MultiSelectStub,
+                    PvMenu: MenuStub,
                     ProductHistoryChart: {
                         template: '<div />',
                     },
@@ -357,6 +436,8 @@ describe('ProductDetailView', () => {
                     PvButton: ButtonStub,
                     PvInputText: InputTextStub,
                     PvCheckbox: CheckboxStub,
+                    PvMultiSelect: MultiSelectStub,
+                    PvMenu: MenuStub,
                     ProductHistoryChart: {
                         template: '<div />',
                     },
@@ -404,6 +485,8 @@ describe('ProductDetailView', () => {
                     PvButton: ButtonStub,
                     PvInputText: InputTextStub,
                     PvCheckbox: CheckboxStub,
+                    PvMultiSelect: MultiSelectStub,
+                    PvMenu: MenuStub,
                     ProductHistoryChart: { template: '<div />' },
                     PvInputTextarea: { template: '<textarea />' },
                 },
@@ -477,6 +560,8 @@ describe('ProductDetailView', () => {
                     PvButton: ButtonStub,
                     PvInputText: InputTextStub,
                     PvCheckbox: CheckboxStub,
+                    PvMultiSelect: MultiSelectStub,
+                    PvMenu: MenuStub,
                     ProductHistoryChart: { template: '<div />' },
                     PvInputTextarea: { template: '<textarea />' },
                 },
@@ -490,7 +575,7 @@ describe('ProductDetailView', () => {
         expect(secondaryRow).toBeTruthy()
         const promoteButton = within(secondaryRow as HTMLElement).getByRole(
             'button',
-            { name: /make primary/i },
+            { name: /set primary url/i },
         ) as HTMLButtonElement
         await fireEvent.click(promoteButton)
 
@@ -526,6 +611,8 @@ describe('ProductDetailView', () => {
                     PvButton: ButtonStub,
                     PvInputText: InputTextStub,
                     PvCheckbox: CheckboxStub,
+                    PvMultiSelect: MultiSelectStub,
+                    PvMenu: MenuStub,
                     ProductHistoryChart: { template: '<div />' },
                     PvInputTextarea: { template: '<textarea />' },
                 },

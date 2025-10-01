@@ -31,9 +31,6 @@ def engine_fixture() -> Iterator[Engine]:
 
 @pytest.fixture(name="client")
 def client_fixture(engine: Engine) -> Iterator[TestClient]:
-    previous_bypass = settings.auth_bypass
-    settings.auth_bypass = False
-
     def override_get_session() -> Iterator[Session]:
         with Session(engine) as session:
             yield session
@@ -52,7 +49,6 @@ def client_fixture(engine: Engine) -> Iterator[TestClient]:
             yield client
     finally:
         app.dependency_overrides.pop(get_session, None)
-        settings.auth_bypass = previous_bypass
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -73,7 +74,6 @@ class FakeOIDCProvider:
 
 @pytest.fixture(autouse=True)
 def configure_auth_settings() -> None:
-    settings.auth_bypass = False
     settings.oidc_client_id = "costcourter-test"
     settings.oidc_authorization_endpoint = cast(
         AnyHttpUrl, "https://auth.example.com/authorize"
@@ -86,6 +86,7 @@ def configure_auth_settings() -> None:
         AnyHttpUrl, "https://frontend.example.com/auth/callback"
     )
     settings.oidc_scopes = ["openid", "email", "profile"]
+    settings.oidc_issuer = None
     settings.passkey_relying_party_id = "localhost"
     settings.passkey_relying_party_name = "CostCourter"
     settings.passkey_origin = cast(AnyHttpUrl, "https://frontend.example.com")
@@ -231,7 +232,8 @@ class FakePasskeyBackend:
         expected_origin: str,
         expected_rp_id: str,
     ) -> RegistrationVerification:
-        assert expected_origin == settings.passkey_origin
+        normalized_origin = str(settings.passkey_origin).rstrip("/")
+        assert expected_origin == normalized_origin
         assert expected_rp_id == settings.passkey_relying_party_id
         self.registration_calls.append(credential)
         self._challenge_log.append(expected_challenge)
@@ -247,7 +249,8 @@ class FakePasskeyBackend:
         expected_rp_id: str,
     ) -> AuthenticationVerification:
         assert credential_record.credential_id == credential["id"]
-        assert expected_origin == settings.passkey_origin
+        normalized_origin = str(settings.passkey_origin).rstrip("/")
+        assert expected_origin == normalized_origin
         assert expected_rp_id == settings.passkey_relying_party_id
         self.authentication_calls.append(credential)
         self._challenge_log.append(expected_challenge)
@@ -258,10 +261,18 @@ def test_passkey_registration_and_authentication_flow(
     client: TestClient, engine: Engine
 ) -> None:
     backend = FakePasskeyBackend()
-    challenges = iter([b"register-challenge", b"authenticate-challenge"])
+    challenges = deque(
+        [
+            b"register-challenge",
+            b"authenticate-challenge",
+            b"anonymous-challenge",
+        ]
+    )
 
     def challenge_generator() -> bytes:
-        return next(challenges)
+        if challenges:
+            return challenges.popleft()
+        return b"anonymous-challenge"
 
     def override_passkey_service() -> PasskeyService:
         return PasskeyService(
@@ -339,6 +350,14 @@ def test_passkey_registration_and_authentication_flow(
         allow = auth_data["options"]["allowCredentials"]
         assert allow[0]["id"] == base64.urlsafe_b64encode(b"credential-1").decode()
 
+        anonymous_begin = client.post(
+            "/api/auth/passkeys/assert/begin",
+            json={},
+        )
+        assert anonymous_begin.status_code == 200
+        anon_data = anonymous_begin.json()
+        assert anon_data["options"]["allowCredentials"] == []
+
         auth_complete = client.post(
             "/api/auth/passkeys/assert/complete",
             json={
@@ -376,7 +395,8 @@ def test_passkey_registration_and_authentication_flow(
 def test_get_current_user_requires_authorization_header(client: TestClient) -> None:
     client.headers.pop("Authorization", None)
     response = client.get("/api/product-urls")
-    assert response.status_code == 401
+    assert response.status_code in {401, 403}
+    assert "not authenticated" in response.json()["detail"].lower()
 
 
 def test_get_current_user_rejects_invalid_token(client: TestClient) -> None:

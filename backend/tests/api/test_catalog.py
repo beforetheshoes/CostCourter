@@ -1483,6 +1483,60 @@ def test_product_url_list_supports_filters(authed_client: TestClient) -> None:
     assert len(paginated.json()) == 1
 
 
+def test_refresh_product_url_metadata(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = authed_client.post(
+        "/api/stores", json={"name": "Shop", "slug": "shop"}
+    ).json()
+    product = authed_client.post(
+        "/api/products",
+        json={"name": "Original Gadget", "slug": "original-gadget"},
+    ).json()
+
+    url_payload = {
+        "product_id": product["id"],
+        "store_id": store["id"],
+        "url": "https://example.com/gadget",
+        "is_primary": True,
+    }
+    created = authed_client.post("/api/product-urls", json=url_payload)
+    assert created.status_code == 201
+    product_url = created.json()
+
+    refreshed_metadata = {
+        "title": "Updated Gadget Name",
+        "image": "https://cdn.example.com/gadget.jpg",
+        "description": "A refreshed gadget description.",
+        "currency": "USD",
+    }
+
+    def _fake_fetch(
+        url: str,
+        scraper_base_url: str | None,
+        http_client_factory: Any,
+        *,
+        diagnostics: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if diagnostics is not None:
+            diagnostics.append("Fetched metadata in test harness")
+        return refreshed_metadata.copy()
+
+    monkeypatch.setattr("app.services.catalog.fetch_url_metadata", _fake_fetch)
+
+    response = authed_client.post(f"/api/product-urls/{product_url['id']}/refresh")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["title"] == "Updated Gadget Name"
+    assert payload["name_updated"] is True
+    assert payload["image_updated"] is True
+    assert any("Fetched metadata" in warning for warning in payload["warnings"])
+
+    refreshed_product = authed_client.get(f"/api/products/{product['id']}").json()
+    assert refreshed_product["name"] == "Updated Gadget Name"
+    assert refreshed_product["image_url"] == "https://cdn.example.com/gadget.jpg"
+
+
 def test_create_product_url_with_existing_user(authed_client: TestClient) -> None:
     user_response = authed_client.post(
         "/api/users",

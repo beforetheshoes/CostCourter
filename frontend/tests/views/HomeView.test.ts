@@ -15,6 +15,7 @@ vi.mock('../../src/lib/http', () => {
 })
 
 import HomeView from '../../src/views/HomeView.vue'
+import LoginView from '../../src/views/LoginView.vue'
 import { apiClient } from '../../src/lib/http'
 
 const mockedPost = (apiClient as unknown as { post: ReturnType<typeof vi.fn> })
@@ -70,6 +71,27 @@ const createPlainStub = (name: string) =>
         },
     })
 
+const createInputStub = () =>
+    defineComponent({
+        name: 'PvInputTextStub',
+        props: {
+            modelValue: { type: String, default: '' },
+        },
+        emits: ['update:modelValue'],
+        setup(props, { emit, attrs }) {
+            return () =>
+                h('input', {
+                    ...attrs,
+                    value: props.modelValue,
+                    onInput: (event: Event) =>
+                        emit(
+                            'update:modelValue',
+                            (event.target as HTMLInputElement).value,
+                        ),
+                })
+        },
+    })
+
 const createTagStub = (name: string) =>
     defineComponent({
         name,
@@ -97,6 +119,7 @@ const RouterLinkStub = defineComponent({
 
 describe('HomeView', () => {
     beforeEach(() => {
+        vi.unstubAllEnvs()
         setActivePinia(createPinia())
         window.localStorage.clear()
         mockedPost.mockReset()
@@ -120,16 +143,36 @@ describe('HomeView', () => {
             history: createMemoryHistory(),
             routes: [
                 {
-                    path: '/',
-                    name: 'home',
-                    component: { template: '<div />' },
+                    path: '/dashboard',
+                    name: 'dashboard',
+                    component: HomeView,
                 },
             ],
         })
 
-    const renderView = async (path = '/') => {
-        const router = createTestRouter()
+    const renderLogin = async (path = '/?redirect=/settings') => {
+        const router = createRouter({
+            history: createMemoryHistory(),
+            routes: [{ path: '/', name: 'login', component: LoginView }],
+        })
         router.push(path)
+        await router.isReady()
+        return render(LoginView, {
+            global: {
+                plugins: [router],
+                stubs: {
+                    RouterLink: RouterLinkStub,
+                    PvButton: createButtonStub(),
+                    PvCard: createCardStub(),
+                    PvInputText: createInputStub(),
+                },
+            },
+        })
+    }
+
+    const renderHome = async () => {
+        const router = createTestRouter()
+        router.push('/dashboard')
         await router.isReady()
         return render(HomeView, {
             global: {
@@ -156,7 +199,13 @@ describe('HomeView', () => {
             },
         })
 
-        const { getByRole } = await renderView('/?redirect=/settings')
+        vi.stubEnv('VITE_OIDC_ENABLED', 'true')
+        vi.stubEnv(
+            'VITE_OIDC_REDIRECT_URI',
+            'http://localhost:5173/auth/callback',
+        )
+
+        const { getByRole } = await renderLogin('/?redirect=/settings')
 
         const button = getByRole('button', { name: /continue with sso/i })
         button.click()
@@ -180,7 +229,7 @@ describe('HomeView', () => {
             JSON.stringify({ accessToken: 'token', tokenType: 'Bearer' }),
         )
 
-        const { getByText } = await renderView()
+        const { getByText } = await renderHome()
         expect(getByText(/settings hub/i)).toBeTruthy()
         expect(getByText(/product workspace/i)).toBeTruthy()
     })

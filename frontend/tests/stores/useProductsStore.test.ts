@@ -590,6 +590,50 @@ describe('useProductsStore', () => {
         expect(mocked.get).not.toHaveBeenCalled()
     })
 
+    it('refreshes product URL metadata and updates cached product', async () => {
+        const store = useProductsStore()
+        mocked.post.mockResolvedValueOnce({
+            data: {
+                product_id: 11,
+                product_url_id: 42,
+                metadata: {
+                    title: 'Updated Gadget',
+                    image: 'https://cdn.example.com/gadget.jpg',
+                },
+                applied_name: 'Updated Gadget',
+                applied_image_url: 'https://cdn.example.com/gadget.jpg',
+                name_updated: true,
+                image_updated: true,
+                warnings: ['refreshed'],
+            },
+        })
+
+        mocked.get.mockResolvedValueOnce({
+            data: {
+                id: 11,
+                name: 'Updated Gadget',
+                slug: 'updated-gadget',
+                description: null,
+                is_active: true,
+                image_url: 'https://cdn.example.com/gadget.jpg',
+                current_price: null,
+                price_cache: [],
+                latest_price: null,
+                tags: [],
+                urls: [],
+            },
+        })
+
+        const result = await store.refreshUrlMetadata(11, 42)
+        expect(mocked.post).toHaveBeenCalledWith('/product-urls/42/refresh')
+        expect(mocked.get).toHaveBeenCalledWith('/products/11')
+        expect(result.metadata.title).toBe('Updated Gadget')
+        expect(result.product.name).toBe('Updated Gadget')
+        expect(result.product.image_url).toBe(
+            'https://cdn.example.com/gadget.jpg',
+        )
+    })
+
     it('propagates errors for URL mutations', async () => {
         const store = useProductsStore()
         mocked.post.mockRejectedValueOnce(new Error('create url fail'))

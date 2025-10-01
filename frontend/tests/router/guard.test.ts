@@ -1,13 +1,11 @@
 import { Buffer } from 'node:buffer'
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { createMemoryHistory } from 'vue-router'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 
-import { createAppRouter } from '../../src/router'
+import { createAuthGuard } from '../../src/router'
 import { useAuthStore } from '../../src/stores/useAuthStore'
-
-const cloneRouter = () => createAppRouter(createMemoryHistory())
 
 const createJwt = (payload: Record<string, unknown>) => {
     const header = {
@@ -19,26 +17,51 @@ const createJwt = (payload: Record<string, unknown>) => {
     return `${encode(header)}.${encode(payload)}.`
 }
 
+const createRoute = (
+    overrides: Partial<RouteLocationNormalizedLoaded>,
+): RouteLocationNormalizedLoaded =>
+    ({
+        path: '/',
+        name: 'login',
+        params: {},
+        query: {},
+        hash: '',
+        fullPath: '/',
+        matched: [],
+        redirectedFrom: undefined,
+        meta: {},
+        ...overrides,
+    }) as RouteLocationNormalizedLoaded
+
 describe('router guards', () => {
     beforeEach(() => {
+        window.localStorage.clear()
         setActivePinia(createPinia())
+        useAuthStore().$reset()
     })
 
-    it('redirects unauthenticated users attempting to access protected route', async () => {
-        const router = cloneRouter()
-        await router.push('/')
-        await router.isReady()
+    it('redirects unauthenticated users attempting to access protected routes', () => {
+        const authStore = useAuthStore()
+        const guard = createAuthGuard(() => authStore)
+        const next = vi.fn()
 
-        await router.push('/settings').catch(() => {})
-        expect(router.currentRoute.value.name).toBe('home')
-        expect(router.currentRoute.value.fullPath).toBe('/?redirect=/settings')
+        guard(
+            createRoute({
+                name: 'settings',
+                fullPath: '/settings',
+                meta: { requiresAuth: true, requiredRole: 'admin' },
+            }),
+            createRoute({}),
+            next,
+        )
+
+        expect(next).toHaveBeenCalledWith({
+            name: 'login',
+            query: { redirect: '/settings' },
+        })
     })
 
-    it('blocks products access without admin role', async () => {
-        const router = cloneRouter()
-        await router.push('/')
-        await router.isReady()
-
+    it('redirects non-admin users when accessing admin-only routes', () => {
         const authStore = useAuthStore()
         authStore.setTokens({
             accessToken: createJwt({
@@ -48,15 +71,26 @@ describe('router guards', () => {
             tokenType: 'Bearer',
         })
 
-        await router.push('/products').catch(() => {})
-        expect(router.currentRoute.value.name).toBe('home')
+        const guard = createAuthGuard(() => authStore)
+        const next = vi.fn()
+
+        guard(
+            createRoute({
+                name: 'products',
+                fullPath: '/products',
+                meta: { requiresAuth: true, requiredRole: 'admin' },
+            }),
+            createRoute({}),
+            next,
+        )
+
+        expect(next).toHaveBeenCalledWith({
+            name: 'login',
+            query: { redirect: '/products' },
+        })
     })
 
-    it('allows settings access with admin role', async () => {
-        const router = cloneRouter()
-        await router.push('/')
-        await router.isReady()
-
+    it('allows access when user satisfies role requirements', () => {
         const authStore = useAuthStore()
         authStore.setTokens({
             accessToken: createJwt({
@@ -68,7 +102,37 @@ describe('router guards', () => {
         })
         authStore.roles = ['admin']
 
-        await router.push('/settings')
-        expect(router.currentRoute.value.name).toBe('settings')
+        const guard = createAuthGuard(() => authStore)
+        const next = vi.fn()
+
+        guard(
+            createRoute({
+                name: 'settings',
+                fullPath: '/settings',
+                meta: { requiresAuth: true, requiredRole: 'admin' },
+            }),
+            createRoute({}),
+            next,
+        )
+
+        expect(next).toHaveBeenCalledWith()
+    })
+
+    it('redirects authenticated users away from login', () => {
+        const authStore = useAuthStore()
+        authStore.setTokens({
+            accessToken: createJwt({
+                sub: '1',
+                exp: Math.floor(Date.now() / 1000) + 3600,
+            }),
+            tokenType: 'Bearer',
+        })
+
+        const guard = createAuthGuard(() => authStore)
+        const next = vi.fn()
+
+        guard(createRoute({ name: 'login' }), createRoute({}), next)
+
+        expect(next).toHaveBeenCalledWith({ name: 'dashboard' })
     })
 })

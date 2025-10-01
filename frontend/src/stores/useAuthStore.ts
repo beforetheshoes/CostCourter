@@ -2,6 +2,12 @@ import { defineStore } from 'pinia'
 import { jwtDecode } from 'jwt-decode'
 
 import { apiClient, attachAuthInterceptor } from '../lib/http'
+import {
+    decodeCreationOptions,
+    decodeRequestOptions,
+    ensurePasskeySupport,
+    publicKeyCredentialToJSON,
+} from '../lib/passkey'
 
 export type Tokens = {
     accessToken: string
@@ -74,23 +80,18 @@ export const useAuthStore = defineStore('auth', {
         oidcState: readJSON<OidcState>(OIDC_STATE_STORAGE_KEY),
         currentUser: null as CurrentUser | null,
         claims: null as AccessTokenClaims | null,
-        roles: (import.meta.env.VITE_AUTH_BYPASS === 'true'
-            ? ['admin']
-            : []) as string[],
+        roles: [] as string[],
         loading: false,
         error: null as string | null,
         refreshTimer: null as number | null,
     }),
     getters: {
-        isAuthenticated: (state) =>
-            Boolean(state.tokens?.accessToken) ||
-            import.meta.env.VITE_AUTH_BYPASS === 'true',
+        isAuthenticated: (state) => Boolean(state.tokens?.accessToken),
         accessToken: (state) => state.tokens?.accessToken ?? null,
         tokenType: (state) => state.tokens?.tokenType ?? null,
     },
     actions: {
         hasRole(role: string) {
-            if (import.meta.env.VITE_AUTH_BYPASS === 'true') return true
             return this.roles.includes(role)
         },
         async beginOidcLogin(redirectUri?: string): Promise<OIDCStartResponse> {
@@ -137,6 +138,144 @@ export const useAuthStore = defineStore('auth', {
                         ? error.message
                         : 'OIDC callback failed'
                 throw error
+            } finally {
+                this.loading = false
+            }
+        },
+        async registerPasskey({
+            email,
+            fullName,
+        }: {
+            email: string
+            fullName?: string
+        }) {
+            const normalizedEmail = email.trim().toLowerCase()
+            if (!normalizedEmail) {
+                const message = 'Email is required for passkey registration.'
+                this.error = message
+                throw new Error(message)
+            }
+            this.loading = true
+            this.error = null
+            try {
+                ensurePasskeySupport()
+                const begin = await apiClient.post(
+                    '/auth/passkeys/register/begin',
+                    {
+                        email: normalizedEmail,
+                        full_name: fullName?.trim() || null,
+                    },
+                )
+                const options = decodeCreationOptions(begin.data.options)
+                const credential = (await navigator.credentials.create({
+                    publicKey: options,
+                })) as PublicKeyCredential | null
+                if (!credential) {
+                    const message = 'Passkey registration was cancelled.'
+                    this.error = message
+                    throw new Error(message)
+                }
+                const payload = publicKeyCredentialToJSON(credential)
+                const complete = await apiClient.post<TokenResponse>(
+                    '/auth/passkeys/register/complete',
+                    {
+                        state: begin.data.state,
+                        credential: payload,
+                    },
+                )
+                this.setTokens({
+                    accessToken: complete.data.access_token,
+                    tokenType: complete.data.token_type,
+                })
+                await this.fetchCurrentUser()
+            } catch (error) {
+                if (!this.error) {
+                    this.error =
+                        error instanceof Error
+                            ? error.message
+                            : 'Passkey registration failed'
+                }
+                throw error instanceof Error
+                    ? error
+                    : new Error('Passkey registration failed')
+            } finally {
+                this.loading = false
+            }
+        },
+        async authenticatePasskey(email?: string | null) {
+            const normalizedEmail = email?.trim().toLowerCase() ?? null
+            this.loading = true
+            this.error = null
+            try {
+                ensurePasskeySupport()
+                const begin = await apiClient.post(
+                    '/auth/passkeys/assert/begin',
+                    normalizedEmail ? { email: normalizedEmail } : {},
+                )
+                const options = decodeRequestOptions(begin.data.options)
+                if (typeof console !== 'undefined') {
+                    const challengeBytes =
+                        options.challenge instanceof ArrayBuffer
+                            ? options.challenge.byteLength
+                            : options.challenge?.byteLength
+                    const allowCredentials = options.allowCredentials?.map(
+                        (descriptor) => {
+                            const id = descriptor.id
+                            const idBytes =
+                                id instanceof ArrayBuffer
+                                    ? id.byteLength
+                                    : id instanceof Uint8Array
+                                      ? id.byteLength
+                                      : undefined
+                            return {
+                                type: descriptor.type,
+                                idBytes,
+                                transports: descriptor.transports,
+                            }
+                        },
+                    )
+                    console.debug('Passkey request options', {
+                        challengeBytes,
+                        allowCredentials,
+                    })
+                }
+                const credential = (await navigator.credentials.get({
+                    publicKey: options,
+                })) as PublicKeyCredential | null
+                if (!credential) {
+                    const message = 'Passkey authentication was cancelled.'
+                    this.error = message
+                    throw new Error(message)
+                }
+                const payload = publicKeyCredentialToJSON(credential)
+                const complete = await apiClient.post<TokenResponse>(
+                    '/auth/passkeys/assert/complete',
+                    {
+                        state: begin.data.state,
+                        credential: payload,
+                    },
+                )
+                this.setTokens({
+                    accessToken: complete.data.access_token,
+                    tokenType: complete.data.token_type,
+                })
+                await this.fetchCurrentUser()
+            } catch (error) {
+                if (error && typeof console !== 'undefined') {
+                    console.error('Passkey sign-in failed', error)
+                }
+                if (!this.error) {
+                    if (error instanceof DOMException) {
+                        this.error = `${error.name}: ${error.message || 'Passkey sign-in failed'}`
+                    } else if (error instanceof Error) {
+                        this.error = error.message
+                    } else {
+                        this.error = 'Passkey sign-in failed'
+                    }
+                }
+                throw error instanceof Error
+                    ? error
+                    : new Error('Passkey sign-in failed')
             } finally {
                 this.loading = false
             }
@@ -239,4 +378,27 @@ const safeTokenProvider = () => {
 
 export const registerAuthInterceptor = () => {
     attachAuthInterceptor(apiClient, safeTokenProvider)
+    apiClient.interceptors.response.use(
+        (response) => response,
+        (error) => {
+            const status = error?.response?.status
+            if (status === 401) {
+                const authStore = useAuthStore()
+                const isLoginRoute = window.location.pathname === '/'
+                const isAuthCallback =
+                    window.location.pathname.startsWith('/auth/callback')
+                const redirectTarget = `${window.location.pathname}${window.location.search}${window.location.hash}`
+
+                authStore.logout(false)
+                if (!isLoginRoute && !isAuthCallback) {
+                    window.localStorage.setItem(
+                        POST_LOGIN_REDIRECT_KEY,
+                        redirectTarget,
+                    )
+                }
+                window.location.replace('/')
+            }
+            return Promise.reject(error)
+        },
+    )
 }

@@ -11,10 +11,27 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.models import NotificationSetting, User
 from app.services.notification_preferences import (
+    SECRET_PLACEHOLDER,
     InvalidNotificationConfigError,
     NotificationChannelUnavailableError,
     UnknownNotificationChannelError,
+    decrypt_secret_value,
 )
+from app.services.notifications import (
+    NotificationService,
+    set_notification_service_factory,
+)
+
+
+class _StubNotificationService(NotificationService):
+    def __init__(self, result: bool = True) -> None:
+        super().__init__(settings=settings)
+        self.result = result
+        self.calls: list[tuple[str]] = []
+
+    def send_channel_test(self, session: Session, *, user: User, channel: str) -> bool:
+        self.calls.append((channel,))
+        return self.result
 
 
 @pytest.fixture(name="current_user")
@@ -56,16 +73,17 @@ def test_list_notification_channels_returns_user_settings(
         apprise_config_path=None,
     )
     try:
-        with Session(engine) as session:
-            session.add(
-                NotificationSetting(
-                    user_id=current_user.id,
-                    channel="pushover",
-                    enabled=False,
-                    config={"user_key": "override-user"},
-                )
-            )
-            session.commit()
+        response = client.put(
+            "/api/notifications/channels/pushover",
+            json={
+                "enabled": False,
+                "config": {
+                    "api_token": "user-token",
+                    "user_key": "override-user",
+                },
+            },
+        )
+        assert response.status_code == 200
 
         response = client.get("/api/notifications/channels")
         assert response.status_code == 200
@@ -82,10 +100,16 @@ def test_list_notification_channels_returns_user_settings(
         pushover = channels["pushover"]
         assert pushover["available"] is True
         assert pushover["enabled"] is False
-        assert pushover["config"] == {"user_key": "override-user"}
+        assert pushover["config"] == {
+            "api_token": SECRET_PLACEHOLDER,
+            "user_key": SECRET_PLACEHOLDER,
+        }
         assert pushover["config_fields"]
-        assert pushover["config_fields"][0]["key"] == "user_key"
-        assert pushover["config_fields"][0]["required"] is False
+        field_keys = [field["key"] for field in pushover["config_fields"]]
+        assert field_keys == ["api_token", "user_key"]
+        for field in pushover["config_fields"]:
+            assert field["required"] is True
+            assert field["secret"] is True
 
         gotify = channels["gotify"]
         assert gotify["available"] is False
@@ -131,18 +155,27 @@ def test_update_notification_channel_pushover_persists_config(
     current_user: User,
 ) -> None:
     previous = _set_settings(
-        notify_pushover_token="pushover-token",
+        notify_pushover_token=None,
         notify_pushover_user=None,
     )
     try:
         response = client.put(
             "/api/notifications/channels/pushover",
-            json={"enabled": True, "config": {"user_key": "override"}},
+            json={
+                "enabled": True,
+                "config": {
+                    "api_token": "app-token",
+                    "user_key": "override",
+                },
+            },
         )
         assert response.status_code == 200
         body = response.json()
         assert body["enabled"] is True
-        assert body["config"] == {"user_key": "override"}
+        assert body["config"] == {
+            "api_token": SECRET_PLACEHOLDER,
+            "user_key": SECRET_PLACEHOLDER,
+        }
 
         with Session(engine) as session:
             setting = session.exec(
@@ -151,7 +184,16 @@ def test_update_notification_channel_pushover_persists_config(
                 .where(NotificationSetting.channel == "pushover")
             ).one()
         assert setting.enabled is True
-        assert setting.config == {"user_key": "override"}
+        assert setting.config is not None
+        assert set(setting.config.keys()) == {"api_token", "user_key"}
+        assert setting.config["api_token"] != "app-token"
+        assert setting.config["user_key"] != "override"
+        api_token_value = setting.config["api_token"]
+        user_key_value = setting.config["user_key"]
+        assert isinstance(api_token_value, str)
+        assert isinstance(user_key_value, str)
+        assert decrypt_secret_value(api_token_value) == "app-token"
+        assert decrypt_secret_value(user_key_value) == "override"
     finally:
         _restore_settings(previous)
 
@@ -165,8 +207,26 @@ def test_update_notification_channel_requires_available_channel(
             "/api/notifications/channels/pushover",
             json={"enabled": True, "config": {"user_key": "abc"}},
         )
-        assert response.status_code == 400
-        assert "not configured" in response.json()["detail"].lower()
+        assert response.status_code == 422
+        assert "api token" in response.json()["detail"].lower()
+    finally:
+        _restore_settings(previous)
+
+
+def test_update_notification_channel_requires_user_key_when_enabling(
+    client: TestClient,
+) -> None:
+    previous = _set_settings(
+        notify_pushover_token="token",
+        notify_pushover_user=None,
+    )
+    try:
+        response = client.put(
+            "/api/notifications/channels/pushover",
+            json={"enabled": True, "config": {"api_token": "token"}},
+        )
+        assert response.status_code == 422
+        assert "user key" in response.json()["detail"].lower()
     finally:
         _restore_settings(previous)
 
@@ -183,6 +243,94 @@ def test_update_notification_channel_rejects_unknown_config_keys(
         assert response.status_code == 422
         assert "token" in response.json()["detail"]
     finally:
+        _restore_settings(previous)
+
+
+def test_test_notification_channel_dispatches(
+    client: TestClient,
+) -> None:
+    stub = _StubNotificationService()
+    set_notification_service_factory(lambda: stub)
+    previous = _set_settings(notify_pushover_token=None)
+    try:
+        response = client.put(
+            "/api/notifications/channels/pushover",
+            json={
+                "enabled": True,
+                "config": {
+                    "api_token": "app-token",
+                    "user_key": "override",
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = client.post(
+            "/api/notifications/channels/pushover/test",
+        )
+        assert response.status_code == 204
+        assert stub.calls == [("pushover",)]
+    finally:
+        set_notification_service_factory(None)
+        _restore_settings(previous)
+
+
+def test_test_notification_channel_requires_enabled(
+    client: TestClient,
+) -> None:
+    stub = _StubNotificationService()
+    set_notification_service_factory(lambda: stub)
+    previous = _set_settings(notify_pushover_token=None)
+    try:
+        client.put(
+            "/api/notifications/channels/pushover",
+            json={
+                "enabled": False,
+                "config": {
+                    "api_token": "app-token",
+                    "user_key": "override",
+                },
+            },
+        )
+
+        response = client.post(
+            "/api/notifications/channels/pushover/test",
+        )
+        assert response.status_code == 400
+        assert "enable" in response.json()["detail"].lower()
+        assert stub.calls == []
+    finally:
+        set_notification_service_factory(None)
+        _restore_settings(previous)
+
+
+def test_test_notification_channel_handles_incomplete_config(
+    client: TestClient,
+) -> None:
+    stub = _StubNotificationService(result=False)
+    set_notification_service_factory(lambda: stub)
+    previous = _set_settings(notify_pushover_token=None)
+    try:
+        response = client.put(
+            "/api/notifications/channels/pushover",
+            json={
+                "enabled": True,
+                "config": {
+                    "api_token": "app-token",
+                    "user_key": "override",
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = client.post(
+            "/api/notifications/channels/pushover/test",
+        )
+        assert response.status_code == 400
+        assert "incomplete" in response.json()["detail"].lower()
+        assert stub.calls == [("pushover",)]
+    finally:
+        set_notification_service_factory(None)
         _restore_settings(previous)
 
 

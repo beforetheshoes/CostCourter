@@ -4,11 +4,12 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('../../src/lib/http', () => {
     const get = vi.fn()
     const put = vi.fn()
+    const post = vi.fn()
     return {
-        apiClient: { get, put },
+        apiClient: { get, put, post },
         createApiClient: vi.fn(),
         attachAuthInterceptor: vi.fn(),
-        __mock: { get, put },
+        __mock: { get, put, post },
     }
 })
 
@@ -18,16 +19,19 @@ import { useNotificationsStore } from '../../src/stores/useNotificationsStore'
 const mocked = apiClient as unknown as {
     get: ReturnType<typeof vi.fn>
     put: ReturnType<typeof vi.fn>
+    post: ReturnType<typeof vi.fn>
 }
 
 const mockedGet = mocked.get
 const mockedPut = mocked.put
+const mockedPost = mocked.post
 
 describe('useNotificationsStore', () => {
     beforeEach(() => {
         setActivePinia(createPinia())
         mockedGet.mockReset()
         mockedPut.mockReset()
+        mockedPost.mockReset()
     })
 
     it('loads channels from the API', async () => {
@@ -108,5 +112,35 @@ describe('useNotificationsStore', () => {
         )
         expect(store.channels[0].enabled).toBe(false)
         expect(store.updating.email).toBe(false)
+    })
+
+    it('sends a test notification and records success', async () => {
+        mockedPost.mockResolvedValue({})
+        const store = useNotificationsStore()
+
+        await store.testChannel('pushover')
+
+        expect(mockedPost).toHaveBeenCalledWith(
+            '/notifications/channels/pushover/test',
+        )
+        expect(store.testing.pushover).toBe(false)
+        expect(store.testStatus.pushover).toEqual({
+            success: true,
+            message: 'Test notification sent successfully.',
+        })
+    })
+
+    it('stores test failures when API returns an error', async () => {
+        mockedPost.mockRejectedValue({
+            response: { data: { detail: 'Channel disabled' } },
+        })
+        const store = useNotificationsStore()
+
+        await expect(store.testChannel('pushover')).rejects.toBeDefined()
+        expect(store.testing.pushover).toBe(false)
+        expect(store.testStatus.pushover).toEqual({
+            success: false,
+            message: 'Channel disabled',
+        })
     })
 })

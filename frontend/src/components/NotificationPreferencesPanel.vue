@@ -6,6 +6,8 @@ import {
     useNotificationsStore,
 } from '../stores/useNotificationsStore'
 
+const SECRET_PLACEHOLDER = '__SECRET_PRESENT__'
+
 const notificationsStore = useNotificationsStore()
 const channelList = computed(() =>
     Array.isArray(notificationsStore.channels)
@@ -16,6 +18,13 @@ const formState = reactive<
     Record<string, { enabled: boolean; config: Record<string, string> }>
 >({})
 const saveErrors = reactive<Record<string, string | null>>({})
+const editMode = reactive<Record<string, boolean>>({})
+
+const isEditingChannel = (channelId: string) => editMode[channelId] !== false
+const isTestingChannel = (channelId: string) =>
+    Boolean(notificationsStore.testing[channelId])
+const getTestStatus = (channelId: string) =>
+    notificationsStore.testStatus[channelId] ?? null
 
 const syncFormState = (channels: NotificationChannel[] | undefined) => {
     const list = Array.isArray(channels) ? channels : []
@@ -28,7 +37,11 @@ const syncFormState = (channels: NotificationChannel[] | undefined) => {
         if (channel.config_fields.length > 0) {
             channel.config_fields.forEach((field) => {
                 const value = channel.config[field.key]
-                config[field.key] = value ?? ''
+                if (field.secret && value === SECRET_PLACEHOLDER) {
+                    config[field.key] = SECRET_PLACEHOLDER
+                } else {
+                    config[field.key] = value ?? ''
+                }
             })
         } else {
             Object.entries(channel.config).forEach(([key, value]) => {
@@ -40,6 +53,15 @@ const syncFormState = (channels: NotificationChannel[] | undefined) => {
             config,
         }
         saveErrors[channel.channel] = null
+        const hasSecretFields = channel.config_fields.some(
+            (field) => field.secret,
+        )
+        const allSecretsLocked = channel.config_fields
+            .filter((field) => field.secret)
+            .every((field) => channel.config[field.key] === SECRET_PLACEHOLDER)
+        const shouldLock =
+            channel.enabled && hasSecretFields && allSecretsLocked
+        editMode[channel.channel] = shouldLock ? false : true
     })
 
     Object.keys(formState).forEach((key) => {
@@ -81,8 +103,12 @@ const sanitizeConfig = (channel: NotificationChannel) => {
         return undefined
     }
     channel.config_fields.forEach((field) => {
-        const rawValue = state.config[field.key] ?? ''
-        const trimmed = rawValue.trim()
+        const rawValue = state.config[field.key]
+        if (field.secret && rawValue === SECRET_PLACEHOLDER) {
+            return
+        }
+        const value = typeof rawValue === 'string' ? rawValue : ''
+        const trimmed = value.trim()
         sanitized[field.key] = trimmed === '' ? null : trimmed
     })
     return sanitized
@@ -115,6 +141,82 @@ const saveChannel = async (channel: NotificationChannel) => {
 }
 
 const isUpdating = (channel: string) => Boolean(updatingState.value[channel])
+
+const getFieldDisplayValue = (
+    channelId: string,
+    fieldKey: string,
+    secret: boolean,
+) => {
+    const state = formState[channelId]
+    if (!state) {
+        return ''
+    }
+    const rawValue = state.config[fieldKey]
+    if (
+        secret &&
+        rawValue === SECRET_PLACEHOLDER &&
+        !isEditingChannel(channelId)
+    ) {
+        return '••••••••'
+    }
+    return typeof rawValue === 'string' ? rawValue : ''
+}
+
+const onFieldInput = (
+    channelId: string,
+    fieldKey: string,
+    secret: boolean,
+    nextValue: string,
+) => {
+    const state = formState[channelId]
+    if (!state) {
+        return
+    }
+    if (secret && state.config[fieldKey] === SECRET_PLACEHOLDER) {
+        state.config[fieldKey] = nextValue
+        return
+    }
+    state.config[fieldKey] = nextValue
+}
+
+const beginEditing = (channel: NotificationChannel) => {
+    editMode[channel.channel] = true
+    const state = formState[channel.channel]
+    if (!state) {
+        return
+    }
+    channel.config_fields.forEach((field) => {
+        if (field.secret && state.config[field.key] === SECRET_PLACEHOLDER) {
+            state.config[field.key] = ''
+        }
+    })
+    notificationsStore.testStatus = {
+        ...notificationsStore.testStatus,
+        [channel.channel]: null,
+    }
+}
+
+const handlePrimaryAction = async (channel: NotificationChannel) => {
+    if (!isEditingChannel(channel.channel)) {
+        beginEditing(channel)
+        return
+    }
+    await saveChannel(channel)
+}
+
+const canSendTest = (channel: NotificationChannel) =>
+    channel.available && channel.enabled && !isEditingChannel(channel.channel)
+
+const triggerTest = async (channel: NotificationChannel) => {
+    if (!canSendTest(channel) || isTestingChannel(channel.channel)) {
+        return
+    }
+    try {
+        await notificationsStore.testChannel(channel.channel)
+    } catch {
+        // errors surface via store state
+    }
+}
 </script>
 
 <template>
@@ -200,6 +302,36 @@ const isUpdating = (channel: string) => Boolean(updatingState.value[channel])
                                 {{ field.label }}
                             </label>
                             <input
+                                v-if="field.secret"
+                                :id="`${channel.channel}-${field.key}`"
+                                :value="
+                                    getFieldDisplayValue(
+                                        channel.channel,
+                                        field.key,
+                                        true,
+                                    )
+                                "
+                                type="password"
+                                autocomplete="new-password"
+                                class="border border-surface-200 rounded px-3 py-2 disabled:opacity-60"
+                                :placeholder="field.placeholder || ''"
+                                :disabled="
+                                    !channel.available ||
+                                    isUpdating(channel.channel) ||
+                                    !isEditingChannel(channel.channel)
+                                "
+                                @input="
+                                    onFieldInput(
+                                        channel.channel,
+                                        field.key,
+                                        true,
+                                        ($event.target as HTMLInputElement)
+                                            .value,
+                                    )
+                                "
+                            />
+                            <input
+                                v-else
                                 :id="`${channel.channel}-${field.key}`"
                                 v-model="
                                     formState[channel.channel].config[field.key]
@@ -226,13 +358,35 @@ const isUpdating = (channel: string) => Boolean(updatingState.value[channel])
                             class="px-4 py-2 rounded bg-primary text-white disabled:opacity-40"
                             type="button"
                             :disabled="
-                                !channel.available ||
-                                isUpdating(channel.channel)
+                                (isEditingChannel(channel.channel) &&
+                                    (!channel.available ||
+                                        isUpdating(channel.channel))) ||
+                                (!isEditingChannel(channel.channel) &&
+                                    isUpdating(channel.channel))
                             "
-                            @click="saveChannel(channel)"
+                            @click="handlePrimaryAction(channel)"
                         >
                             {{
-                                isUpdating(channel.channel) ? 'Saving…' : 'Save'
+                                isEditingChannel(channel.channel)
+                                    ? isUpdating(channel.channel)
+                                        ? 'Saving…'
+                                        : 'Save'
+                                    : 'Modify'
+                            }}
+                        </button>
+                        <button
+                            class="px-4 py-2 rounded border border-primary text-primary disabled:opacity-40"
+                            type="button"
+                            :disabled="
+                                !canSendTest(channel) ||
+                                isTestingChannel(channel.channel)
+                            "
+                            @click="triggerTest(channel)"
+                        >
+                            {{
+                                isTestingChannel(channel.channel)
+                                    ? 'Sending…'
+                                    : 'Send test notification'
                             }}
                         </button>
                         <p
@@ -240,6 +394,17 @@ const isUpdating = (channel: string) => Boolean(updatingState.value[channel])
                             class="text-sm text-danger-color"
                         >
                             {{ saveErrors[channel.channel] }}
+                        </p>
+                        <p
+                            v-else-if="getTestStatus(channel.channel)"
+                            class="text-sm"
+                            :class="
+                                getTestStatus(channel.channel)?.success
+                                    ? 'text-color'
+                                    : 'text-danger-color'
+                            "
+                        >
+                            {{ getTestStatus(channel.channel)?.message }}
                         </p>
                     </div>
                 </article>

@@ -261,6 +261,26 @@ class ProductURLUpdate(BaseModel):
     created_by_id: int | None = None
 
 
+class ProductURLMetadata(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    image: str | None = None
+    price: str | None = None
+    currency: str | None = None
+    locale: str | None = None
+
+
+class ProductURLRefreshResponse(BaseModel):
+    product_id: int
+    product_url_id: int
+    metadata: ProductURLMetadata
+    applied_name: str
+    applied_image_url: str | None
+    name_updated: bool
+    image_updated: bool
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PriceHistoryCreate(BaseModel):
     product_id: int
     price: float

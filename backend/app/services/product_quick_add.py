@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -574,8 +574,43 @@ def _parse_scraper_payload(target_url: str, payload: dict[str, Any]) -> dict[str
     currency = None
 
     meta = payload.get("meta") or {}
+
+    parsed_target = urlparse(target_url)
+    base_scheme = parsed_target.scheme or "https"
+    base_root = (
+        f"{base_scheme}://{parsed_target.netloc}"
+        if parsed_target.netloc
+        else target_url
+    )
+
+    def _normalize_image(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.startswith(("http://", "https://", "data:")):
+            return candidate
+        if candidate.startswith("//"):
+            return f"{base_scheme}:{candidate}"
+        if candidate.startswith(("./", "../")):
+            return urljoin(target_url, candidate)
+        if candidate.startswith("/"):
+            return urljoin(base_root, candidate)
+        return candidate
+
     if isinstance(meta, dict):
-        image = meta.get("og:image") or meta.get("twitter:image")
+        for candidate in (
+            meta.get("og:image:secure_url"),
+            meta.get("og:image"),
+            meta.get("og:image:url"),
+            meta.get("twitter:image"),
+            meta.get("twitter:image:src"),
+        ):
+            normalized = _normalize_image(candidate)
+            if normalized:
+                image = normalized
+                break
         price = (
             meta.get("product:price:amount")
             or meta.get("og:price:amount")
@@ -589,12 +624,16 @@ def _parse_scraper_payload(target_url: str, payload: dict[str, Any]) -> dict[str
 
     if html:
         if not image:
-            image = _first_match(
+            html_image = _first_match(
                 html,
                 r'"hiRes"\s*:\s*"(https:[^"\\]+)"',
                 r'id="landingImage"[^>]*data-old-hires="([^"]+)"',
                 r'id="landingImage"[^>]*src="([^"]+)"',
             )
+            if html_image:
+                normalized_html_image = _normalize_image(html_image)
+                if normalized_html_image:
+                    image = normalized_html_image
         if not price:
             price = _first_match(
                 html,

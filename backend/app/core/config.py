@@ -38,8 +38,6 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(default="change-me", min_length=8)
     jwt_algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=30)
-    # Development helper to bypass API auth dependencies.
-    auth_bypass: bool = Field(default=False)
 
     searxng_url: str | None = Field(default=None)
     scraper_base_url: str | None = Field(default=None)
@@ -60,6 +58,7 @@ class Settings(BaseSettings):
     oidc_token_endpoint: AnyHttpUrl | None = Field(default=None)
     oidc_userinfo_endpoint: AnyHttpUrl | None = Field(default=None)
     oidc_redirect_uri: AnyHttpUrl | None = Field(default=None)
+    oidc_issuer: AnyHttpUrl | None = Field(default=None)
     oidc_scopes: list[str] = Field(
         default_factory=lambda: ["openid", "email", "profile"]
     )
@@ -70,6 +69,7 @@ class Settings(BaseSettings):
     passkey_origin: AnyHttpUrl | None = Field(default=None)
     passkey_challenge_ttl_seconds: int = Field(default=300)
     passkey_timeout_ms: int = Field(default=60000)
+    passkey_require_user_verification: bool = Field(default=True)
 
     notify_email_enabled: bool = Field(default=False)
     notify_pushover_token: str | None = Field(default=None)

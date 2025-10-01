@@ -120,6 +120,66 @@ class OIDCProviderProtocol(Protocol):
 class OIDCProvider(OIDCProviderProtocol):
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._authorization_endpoint: str | None = (
+            str(settings.oidc_authorization_endpoint)
+            if settings.oidc_authorization_endpoint
+            else None
+        )
+        self._token_endpoint: str | None = (
+            str(settings.oidc_token_endpoint) if settings.oidc_token_endpoint else None
+        )
+        self._userinfo_endpoint: str | None = (
+            str(settings.oidc_userinfo_endpoint)
+            if settings.oidc_userinfo_endpoint
+            else None
+        )
+        self._issuer: str | None = (
+            str(settings.oidc_issuer) if settings.oidc_issuer else None
+        )
+        self._ensure_discovery()
+
+    def _ensure_discovery(self) -> None:
+        if (
+            self._authorization_endpoint
+            and self._token_endpoint
+            and self._userinfo_endpoint
+        ):
+            return
+        if self._issuer is None:
+            return
+
+        metadata = self._discover_metadata(self._issuer)
+        self._authorization_endpoint = self._authorization_endpoint or metadata.get(
+            "authorization_endpoint"
+        )
+        self._token_endpoint = self._token_endpoint or metadata.get("token_endpoint")
+        self._userinfo_endpoint = self._userinfo_endpoint or metadata.get(
+            "userinfo_endpoint"
+        )
+        if self._issuer is None:
+            self._issuer = metadata.get("issuer")
+
+    def _discover_metadata(self, issuer: str) -> dict[str, str | None]:
+        base = issuer.rstrip("/")
+        url = f"{base}/.well-known/openid-configuration"
+        try:
+            with httpx.Client(timeout=10) as client:
+                response = client.get(url)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to fetch OIDC discovery document",
+            ) from exc
+        data = cast(dict[str, Any], response.json())
+        return {
+            "authorization_endpoint": cast(
+                str | None, data.get("authorization_endpoint")
+            ),
+            "token_endpoint": cast(str | None, data.get("token_endpoint")),
+            "userinfo_endpoint": cast(str | None, data.get("userinfo_endpoint")),
+            "issuer": cast(str | None, data.get("issuer")),
+        }
 
     def authorization_url(
         self,
@@ -130,7 +190,7 @@ class OIDCProvider(OIDCProviderProtocol):
         redirect_uri: str,
         scope: str,
     ) -> str:
-        endpoint = self._settings.oidc_authorization_endpoint
+        endpoint = self._authorization_endpoint
         client_id = self._settings.oidc_client_id
         if endpoint is None or client_id is None:
             raise HTTPException(
@@ -156,7 +216,7 @@ class OIDCProvider(OIDCProviderProtocol):
         code_verifier: str,
         redirect_uri: str,
     ) -> dict[str, Any]:
-        endpoint = self._settings.oidc_token_endpoint
+        endpoint = self._token_endpoint
         client_id = self._settings.oidc_client_id
         if endpoint is None or client_id is None:
             raise HTTPException(
@@ -174,7 +234,7 @@ class OIDCProvider(OIDCProviderProtocol):
             data["client_secret"] = self._settings.oidc_client_secret
         try:
             with httpx.Client(timeout=10) as client:
-                response = client.post(str(endpoint), data=data)
+                response = client.post(endpoint, data=data)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise HTTPException(
@@ -184,7 +244,7 @@ class OIDCProvider(OIDCProviderProtocol):
         return cast(dict[str, Any], response.json())
 
     def fetch_userinfo(self, *, access_token: str) -> OIDCUserInfo:
-        endpoint = self._settings.oidc_userinfo_endpoint
+        endpoint = self._userinfo_endpoint
         if endpoint is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -193,7 +253,7 @@ class OIDCProvider(OIDCProviderProtocol):
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
             with httpx.Client(timeout=10) as client:
-                response = client.get(str(endpoint), headers=headers)
+                response = client.get(endpoint, headers=headers)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise HTTPException(
@@ -205,49 +265,6 @@ class OIDCProvider(OIDCProviderProtocol):
             subject=data.get("sub") or data["id"],
             email=data["email"],
             full_name=data.get("name"),
-        )
-
-
-class DevOIDCProvider(OIDCProviderProtocol):
-    """Development-only OIDC provider that short-circuits the external flow.
-
-    In local development, this provider constructs an authorization URL that
-    redirects back through the API and immediately returns to the frontend
-    callback with a dummy code. Token exchange and userinfo are synthetic.
-    """
-
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
-
-    def authorization_url(
-        self,
-        *,
-        state: str,
-        nonce: str,
-        code_challenge: str,
-        redirect_uri: str,
-        scope: str,
-    ) -> str:
-        base = self._settings.base_url.rstrip("/")
-        params = {"state": state, "redirect_uri": redirect_uri}
-        return f"{base}/api/auth/oidc/dev/authorize?{urlencode(params)}"
-
-    def exchange_code(
-        self,
-        *,
-        code: str,
-        code_verifier: str,
-        redirect_uri: str,
-    ) -> dict[str, Any]:
-        # Always return a synthetic access token
-        return {"access_token": "dev-access-token", "token_type": "Bearer"}
-
-    def fetch_userinfo(self, *, access_token: str) -> OIDCUserInfo:
-        # Provide a deterministic developer identity
-        return OIDCUserInfo(
-            subject="oidc|dev",
-            email="dev@example.com",
-            full_name="Developer",
         )
 
 
@@ -343,24 +360,12 @@ class AuthService:
 
 @lru_cache(maxsize=1)
 def get_auth_service() -> AuthService:
-    # In local development, if no external OIDC is configured, use the
-    # development provider to enable end-to-end auth without external deps.
-    use_dev = (
-        settings.environment == "local"
-        and settings.oidc_authorization_endpoint is None
-        and settings.oidc_token_endpoint is None
-        and settings.oidc_userinfo_endpoint is None
-    )
-    provider: OIDCProviderProtocol | None = (
-        DevOIDCProvider(settings) if use_dev else None
-    )
-    return AuthService(settings=settings, provider=provider)
+    return AuthService(settings=settings)
 
 
 __all__ = [
     "AuthService",
     "OIDCProvider",
-    "DevOIDCProvider",
     "OIDCProviderProtocol",
     "OIDCStart",
     "OIDCUserInfo",

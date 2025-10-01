@@ -133,6 +133,26 @@ export type ProductQuickAddResponse = {
     warnings: string[]
 }
 
+export type ProductURLRefreshMetadata = {
+    title?: string | null
+    description?: string | null
+    image?: string | null
+    price?: string | null
+    currency?: string | null
+    locale?: string | null
+}
+
+export type ProductURLRefreshResponse = {
+    product_id: number
+    product_url_id: number
+    metadata: ProductURLRefreshMetadata
+    applied_name: string
+    applied_image_url: string | null
+    name_updated: boolean
+    image_updated: boolean
+    warnings: string[]
+}
+
 const mergeProductUrls = (urls: ProductURL[], updated: ProductURL) => {
     const others = urls.filter((entry) => entry.id !== updated.id)
     const demoted = updated.is_primary
@@ -248,6 +268,29 @@ export const useProductsStore = defineStore('products', {
                     (error instanceof Error
                         ? error.message
                         : 'Failed to add product URL')
+                this.error = message
+                throw new Error(message)
+            }
+        },
+        async refreshUrlMetadata(
+            productId: number,
+            productUrlId: number,
+        ): Promise<ProductURLRefreshResponse & { product: Product }> {
+            this.error = null
+            try {
+                const response =
+                    await apiClient.post<ProductURLRefreshResponse>(
+                        `/product-urls/${productUrlId}/refresh`,
+                    )
+                const updatedProduct = await this.fetch(productId)
+                return { ...response.data, product: updatedProduct }
+            } catch (error) {
+                const axiosError = error as AxiosError<{ detail?: string }>
+                const message =
+                    axiosError.response?.data?.detail ??
+                    (error instanceof Error
+                        ? error.message
+                        : 'Failed to refresh product metadata')
                 this.error = message
                 throw new Error(message)
             }

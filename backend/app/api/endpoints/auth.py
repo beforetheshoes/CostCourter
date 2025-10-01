@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, status
 from sqlmodel import Session
 
 from app.api.deps import get_current_user
-from app.core.config import settings
 from app.core.database import get_session
 from app.models import User
 from app.schemas import (
@@ -56,21 +55,6 @@ def oidc_callback(
         code=payload.code,
     )
     return TokenResponse(access_token=result.access_token, token_type=result.token_type)
-
-
-@router.get("/oidc/dev/authorize", status_code=status.HTTP_302_FOUND)
-def oidc_dev_authorize(
-    *,
-    state: str = Query(..., description="Opaque state issued by /oidc/start"),
-    redirect_uri: str = Query(..., description="Frontend callback URI"),
-) -> Response:
-    """Development-only authorization endpoint.
-
-    Immediately redirects the browser back to the frontend callback with the
-    provided state and a synthetic authorization code.
-    """
-    location = f"{redirect_uri}?state={state}&code=dev-code"
-    return Response(status_code=status.HTTP_302_FOUND, headers={"Location": location})
 
 
 @router.post(
@@ -146,16 +130,4 @@ def read_current_user(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> CurrentUserRead:
-    # In auth bypass mode, avoid any DB access to prevent mapper configuration
-    # from running during local dev and simply return a synthetic user payload.
-    if settings.auth_bypass:
-        return CurrentUserRead(
-            id=0,
-            email="dev@example.com",
-            full_name="Developer",
-            identities=[],
-            is_superuser=True,
-            roles=["admin"],
-        )
-
     return user_service.build_current_user_response(session, current_user)

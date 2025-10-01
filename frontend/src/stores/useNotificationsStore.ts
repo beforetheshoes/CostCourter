@@ -37,6 +37,11 @@ export const useNotificationsStore = defineStore('notifications', {
         loading: false,
         error: null as string | null,
         updating: {} as Record<string, boolean>,
+        testing: {} as Record<string, boolean>,
+        testStatus: {} as Record<
+            string,
+            { success: boolean; message: string } | null
+        >,
     }),
     actions: {
         async fetchChannels() {
@@ -48,6 +53,16 @@ export const useNotificationsStore = defineStore('notifications', {
                         '/notifications/channels',
                     )
                 this.channels = response.data.channels
+                const knownChannels = new Set(
+                    response.data.channels.map((entry) => entry.channel),
+                )
+                const retainedStatus: typeof this.testStatus = {}
+                Object.entries(this.testStatus).forEach(([key, value]) => {
+                    if (knownChannels.has(key)) {
+                        retainedStatus[key] = value
+                    }
+                })
+                this.testStatus = retainedStatus
             } catch (error) {
                 const message =
                     error instanceof Error
@@ -79,9 +94,48 @@ export const useNotificationsStore = defineStore('notifications', {
                 } else {
                     this.channels.push(response.data)
                 }
+                this.testStatus = { ...this.testStatus, [channel]: null }
                 return response.data
             } finally {
                 this.updating = { ...this.updating, [channel]: false }
+            }
+        },
+        async testChannel(channel: string) {
+            this.testing = { ...this.testing, [channel]: true }
+            this.testStatus = { ...this.testStatus, [channel]: null }
+            try {
+                await apiClient.post(`/notifications/channels/${channel}/test`)
+                this.testStatus = {
+                    ...this.testStatus,
+                    [channel]: {
+                        success: true,
+                        message: 'Test notification sent successfully.',
+                    },
+                }
+            } catch (error) {
+                let message = 'Failed to send test notification'
+                if (
+                    typeof error === 'object' &&
+                    error !== null &&
+                    'response' in error &&
+                    error.response &&
+                    typeof error.response === 'object' &&
+                    'data' in error.response &&
+                    error.response.data &&
+                    typeof error.response.data === 'object' &&
+                    'detail' in error.response.data
+                ) {
+                    message = String(error.response.data.detail)
+                } else if (error instanceof Error) {
+                    message = error.message
+                }
+                this.testStatus = {
+                    ...this.testStatus,
+                    [channel]: { success: false, message },
+                }
+                throw error
+            } finally {
+                this.testing = { ...this.testing, [channel]: false }
             }
         },
     },

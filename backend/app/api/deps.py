@@ -7,51 +7,20 @@ import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError
-from sqlalchemy.orm.exc import FlushError
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.database import get_session
-from app.models import User, ensure_core_model_mappings
+from app.models import User
 from app.services.user import user_has_role
 
-_bearer_scheme = HTTPBearer(auto_error=not settings.auth_bypass)
+_bearer_scheme = HTTPBearer(auto_error=True)
 
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     session: Session = Depends(get_session),
 ) -> User:
-    if settings.auth_bypass:
-        ensure_core_model_mappings()
-
-        statement = select(User).where(User.email == "dev@example.com")
-        for _ in range(5):
-            user = session.exec(statement).first()
-            if user is not None:
-                return user
-
-            new_user = User(
-                email="dev@example.com",
-                full_name="Developer",
-                is_superuser=True,
-                is_active=True,
-            )
-            session.add(new_user)
-            try:
-                session.commit()
-            except (IntegrityError, FlushError, InterfaceError, OperationalError):
-                session.rollback()
-                continue
-
-            persisted = session.exec(statement).first()
-            if persisted is not None:
-                return persisted
-
-        msg = "Failed to provision bypass user"
-        raise RuntimeError(msg)
-
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

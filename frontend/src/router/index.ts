@@ -1,13 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import type { Router, RouterHistory } from 'vue-router'
+import type { NavigationGuard, Router, RouterHistory } from 'vue-router'
 
 import { useAuthStore } from '../stores/useAuthStore'
 
 export const routes = [
     {
         path: '/',
-        name: 'home',
+        name: 'login',
+        component: () => import('../views/LoginView.vue'),
+    },
+    {
+        path: '/dashboard',
+        name: 'dashboard',
         component: () => import('../views/HomeView.vue'),
+        meta: { requiresAuth: true, requiredRole: 'admin' },
     },
     {
         path: '/settings',
@@ -58,12 +64,29 @@ export const routes = [
     },
 ]
 
-export const applyGuards = (router: Router) => {
-    router.beforeEach((to, _from, next) => {
-        const authStore = useAuthStore()
+export const createAuthGuard = (
+    resolveStore: () => ReturnType<typeof useAuthStore> = useAuthStore,
+): NavigationGuard => {
+    return (to, _from, next) => {
+        const authStore = resolveStore()
+        const LOGIN_ROUTE = 'login'
+        const isLoginRoute = to.name === LOGIN_ROUTE
+        const isAuthFlowRoute = to.name === 'auth-callback'
+
+        if (isLoginRoute && authStore.isAuthenticated) {
+            next({ name: 'dashboard' })
+            return
+        }
+        if (!authStore.isAuthenticated && !isLoginRoute && !isAuthFlowRoute) {
+            next({
+                name: LOGIN_ROUTE,
+                query: { redirect: to.fullPath },
+            })
+            return
+        }
         if (to.meta.requiresAuth && !authStore.isAuthenticated) {
             next({
-                name: 'home',
+                name: LOGIN_ROUTE,
                 query: { redirect: to.fullPath },
             })
             return
@@ -71,13 +94,20 @@ export const applyGuards = (router: Router) => {
         const requiredRole = to.meta.requiredRole as string | undefined
         if (requiredRole && !authStore.hasRole(requiredRole)) {
             next({
-                name: 'home',
+                name: LOGIN_ROUTE,
                 query: { redirect: to.fullPath },
             })
             return
         }
         next()
-    })
+    }
+}
+
+export const applyGuards = (
+    router: Router,
+    resolveStore: () => ReturnType<typeof useAuthStore> = useAuthStore,
+) => {
+    router.beforeEach(createAuthGuard(resolveStore))
 }
 
 export const createAppRouter = (

@@ -32,7 +32,7 @@ onMounted(async () => {
         await authStore.completeOidcLogin({ state, code })
         message.value = 'Authenticated successfully. Redirecting…'
         window.localStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
-        await router.replace(redirect || '/settings')
+        await router.replace(redirect || '/dashboard')
     } catch (cause) {
         console.error('OIDC callback failed', cause)
         message.value = 'Unable to complete sign-in. Please try again.'

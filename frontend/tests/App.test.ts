@@ -9,7 +9,12 @@ import App from '../src/App.vue'
 import { useAuthStore } from '../src/stores/useAuthStore'
 
 const routes = [
-    { path: '/', name: 'home', component: { template: '<div>Home</div>' } },
+    { path: '/', name: 'login', component: { template: '<div>Login</div>' } },
+    {
+        path: '/dashboard',
+        name: 'dashboard',
+        component: { template: '<div>Dashboard</div>' },
+    },
     {
         path: '/products',
         name: 'products',
@@ -85,13 +90,12 @@ const renderWithProviders = async (
 
 beforeEach(() => {
     vi.unstubAllEnvs()
-    vi.stubEnv('VITE_AUTH_BYPASS', 'false')
 })
 
 describe('App shell behaviour', () => {
     it('renders admin navigation and handles logout flow', async () => {
         const router = createTestRouter()
-        await router.push('/')
+        await router.push('/dashboard')
         await router.isReady()
 
         const logoutSpy = vi.fn()
@@ -128,7 +132,7 @@ describe('App shell behaviour', () => {
         await fireEvent.click(desktopSignOut)
 
         expect(logoutSpy).toHaveBeenCalledWith(false)
-        expect(pushSpy).toHaveBeenCalledWith({ name: 'home' })
+        expect(pushSpy).toHaveBeenCalledWith({ name: 'login' })
 
         pushSpy.mockRestore()
     })
@@ -165,7 +169,7 @@ describe('App shell behaviour', () => {
         await fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
         await waitFor(() =>
             expect(pushSpy).toHaveBeenCalledWith({
-                name: 'home',
+                name: 'login',
                 query: { redirect: '/products' },
             }),
         )

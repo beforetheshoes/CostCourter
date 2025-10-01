@@ -32,6 +32,7 @@ from app.schemas import (
     BulkImportSkipped,
     ProductURLCreate,
     ProductURLRead,
+    ProductURLRefreshResponse,
     ProductURLUpdate,
 )
 from app.services import catalog
@@ -148,6 +149,27 @@ def quick_add_by_url(
         "image": result.image,
         "warnings": result.warnings,
     }
+
+
+@router.post(
+    "/{product_url_id}/refresh",
+    response_model=ProductURLRefreshResponse,
+    status_code=status.HTTP_200_OK,
+)
+def refresh_product_url_metadata_endpoint(
+    product_url_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    scraper_client_factory: HttpClientFactory = Depends(get_scraper_client_factory),
+) -> ProductURLRefreshResponse:
+    ensure_core_model_mappings()
+    return catalog.refresh_product_url_metadata(
+        session,
+        owner=current_user,
+        product_url_id=product_url_id,
+        scraper_base_url=settings.scraper_base_url,
+        http_client_factory=scraper_client_factory,
+    )
 
 
 @router.post("/bulk-import", response_model=BulkImportResponse)

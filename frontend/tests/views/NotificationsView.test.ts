@@ -5,11 +5,12 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('../../src/lib/http', () => {
     const get = vi.fn()
     const put = vi.fn()
+    const post = vi.fn()
     return {
-        apiClient: { get, put },
+        apiClient: { get, put, post },
         createApiClient: vi.fn(),
         attachAuthInterceptor: vi.fn(),
-        __mock: { get, put },
+        __mock: { get, put, post },
     }
 })
 
@@ -19,16 +20,19 @@ import { apiClient } from '../../src/lib/http'
 const mocked = apiClient as unknown as {
     get: ReturnType<typeof vi.fn>
     put: ReturnType<typeof vi.fn>
+    post: ReturnType<typeof vi.fn>
 }
 
 const mockedGet = mocked.get
 const mockedPut = mocked.put
+const mockedPost = mocked.post
 
 describe('NotificationsView', () => {
     beforeEach(() => {
         setActivePinia(createPinia())
         mockedGet.mockReset()
         mockedPut.mockReset()
+        mockedPost.mockReset()
     })
 
     it('renders channels and allows updating configuration', async () => {
@@ -42,15 +46,26 @@ describe('NotificationsView', () => {
                         available: true,
                         unavailable_reason: null,
                         enabled: true,
-                        config: { user_key: 'existing-key' },
+                        config: {
+                            api_token: '__SECRET_PRESENT__',
+                            user_key: '__SECRET_PRESENT__',
+                        },
                         config_fields: [
+                            {
+                                key: 'api_token',
+                                label: 'API token',
+                                description: 'Pushover application token.',
+                                required: true,
+                                secret: true,
+                                placeholder: 'abc123',
+                            },
                             {
                                 key: 'user_key',
                                 label: 'User key',
-                                description: 'Override the default key.',
-                                required: false,
-                                secret: false,
-                                placeholder: 'abc123',
+                                description: 'Recipient key.',
+                                required: true,
+                                secret: true,
+                                placeholder: 'def456',
                             },
                         ],
                     },
@@ -66,28 +81,62 @@ describe('NotificationsView', () => {
                 available: true,
                 unavailable_reason: null,
                 enabled: false,
-                config: { user_key: 'new-key' },
+                config: {
+                    api_token: '__SECRET_PRESENT__',
+                    user_key: '__SECRET_PRESENT__',
+                },
                 config_fields: [
+                    {
+                        key: 'api_token',
+                        label: 'API token',
+                        description: 'Pushover application token.',
+                        required: true,
+                        secret: true,
+                        placeholder: 'abc123',
+                    },
                     {
                         key: 'user_key',
                         label: 'User key',
-                        description: 'Override the default key.',
-                        required: false,
-                        secret: false,
-                        placeholder: 'abc123',
+                        description: 'Recipient key.',
+                        required: true,
+                        secret: true,
+                        placeholder: 'def456',
                     },
                 ],
             },
         })
 
+        mockedPost.mockResolvedValue({})
+
         const { findByText, getByLabelText, getByRole } =
             render(NotificationsView)
 
         expect(await findByText('Pushover')).toBeTruthy()
-        const input = getByLabelText('User key') as HTMLInputElement
-        expect(input.value).toBe('existing-key')
+        const tokenInput = getByLabelText('API token') as HTMLInputElement
+        const userInput = getByLabelText('User key') as HTMLInputElement
+        expect(tokenInput.value).toBe('••••••••')
+        expect(tokenInput.disabled).toBe(true)
+        expect(userInput.value).toBe('••••••••')
+        expect(userInput.disabled).toBe(true)
 
-        await fireEvent.update(input, '  new-key  ')
+        const testButton = getByRole('button', {
+            name: 'Send test notification',
+        })
+        await fireEvent.click(testButton)
+        await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(1))
+        expect(mockedPost).toHaveBeenCalledWith(
+            '/notifications/channels/pushover/test',
+        )
+        mockedPost.mockClear()
+
+        const modifyButton = getByRole('button', { name: 'Modify' })
+        await fireEvent.click(modifyButton)
+
+        expect(tokenInput.disabled).toBe(false)
+        expect(userInput.disabled).toBe(false)
+
+        await fireEvent.update(tokenInput, '  new-token  ')
+        await fireEvent.update(userInput, '  new-key  ')
         const checkbox = getByRole('checkbox') as HTMLInputElement
         expect(checkbox.checked).toBe(true)
 
@@ -98,7 +147,7 @@ describe('NotificationsView', () => {
             '/notifications/channels/pushover',
             {
                 enabled: true,
-                config: { user_key: 'new-key' },
+                config: { api_token: 'new-token', user_key: 'new-key' },
             },
         )
     })
