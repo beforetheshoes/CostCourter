@@ -24,8 +24,10 @@ from app.schemas import (
 from app.services import catalog
 from app.services.auth import issue_access_token
 from app.services.notification_preferences import (
+    SECRET_PLACEHOLDER,
     InvalidNotificationConfigError,
     NotificationChannelUnavailableError,
+    StoredConfigValue,
     UnknownNotificationChannelError,
     list_notification_channels_for_user,
     update_notification_channel_for_user,
@@ -44,6 +46,12 @@ HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 def _get_user_by_email(session: Session, email: str) -> User | None:
     statement = select(User).where(User.email == email)
     return session.exec(statement).first()
+
+
+def _format_channel_config_value(value: str | None) -> str:
+    if isinstance(value, str) and value == SECRET_PLACEHOLDER:
+        return "[secret]"
+    return value or ""
 
 
 @app.command()
@@ -686,7 +694,11 @@ def notifications_list(
     for channel in channels:
         enabled_label = "yes" if channel.enabled else "no"
         available_label = "yes" if channel.available else "no"
-        config_parts = [f"{key}={value}" for key, value in channel.config.items()]
+        config_parts = []
+        for key, value in channel.config.items():
+            display_value = _format_channel_config_value(value)
+            if display_value:
+                config_parts.append(f"{key}={display_value}")
         config_display = ", ".join(config_parts) if config_parts else "—"
         typer.echo(
             f"{channel.channel:<12}{enabled_label:<10}{available_label:<12}{config_display}"
@@ -765,7 +777,24 @@ def notifications_set(
             typer.echo(f"Error: {exc}")
             raise typer.Exit(code=1) from None
 
-    config_parts = [f"{key}={value}" for key, value in result.config.items()]
+    config_parts: list[str] = []
+    config_items: dict[str, StoredConfigValue]
+    if result.config is not None:
+        config_items = dict(result.config)
+    else:
+        config_items = {}
+    for key in config_items:
+        stored_value = config_items[key]
+        normalized_value: str | None
+        if isinstance(stored_value, str):
+            normalized_value = stored_value
+        elif stored_value is None:
+            normalized_value = None
+        else:
+            normalized_value = str(stored_value)
+        display_value = _format_channel_config_value(normalized_value)
+        if display_value:
+            config_parts.append(f"{key}={display_value}")
     config_display = ", ".join(config_parts) if config_parts else "—"
     status_label = "enabled" if result.enabled else "disabled"
     typer.echo(f"Channel '{result.channel}' {status_label}.")

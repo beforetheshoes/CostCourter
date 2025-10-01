@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any, cast
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from redis.exceptions import RedisError
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.models as models
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.database import get_session
 from app.main import app
 from app.models.base import utcnow
 from app.services.audit import record_audit_log
+from app.services.health import _measure_redis, build_readiness_report
 from app.services.schedule_tracker import record_schedule_run
 
 
@@ -146,3 +150,48 @@ def test_health_readiness_and_metrics(client: TestClient, engine: Engine) -> Non
     assert resource_counts["search_cache"] == 1
     assert resource_counts["audit_logs"] == 1
     assert metrics["readiness"]["status"] == "ok"
+
+
+def test_measure_redis_handles_all_outcomes() -> None:
+    settings_obj = Settings()
+
+    with patch("app.services.health.redis.Redis.from_url") as from_url:
+        client = MagicMock()
+        from_url.return_value = client
+        component = _measure_redis(settings_obj)
+        assert component.status == "ok"
+        details_ok = cast(dict[str, Any], component.details)
+        assert "latency_ms" in details_ok
+        client.ping.assert_called_once()
+
+    with patch(
+        "app.services.health.redis.Redis.from_url",
+        side_effect=RedisError("boom"),
+    ):
+        component = _measure_redis(settings_obj)
+        assert component.status == "error"
+        details_error = cast(dict[str, Any], component.details)
+        assert "boom" in details_error["error"]
+
+    skipped = Settings(redis_host="")
+    component = _measure_redis(skipped)
+    assert component.status == "skipped"
+
+
+def test_build_readiness_report_marks_missing_schedule(engine: Engine) -> None:
+    with Session(engine) as session:
+        config = Settings(redis_host="")
+        with patch("app.services.health.fetch_last_run_map", return_value={}):
+            with patch(
+                "app.services.health.ScheduleHealthService.detect_alerts",
+                return_value=[],
+            ):
+                report = build_readiness_report(session, config)
+
+    assert report["status"] == "degraded"
+    components = cast(dict[str, dict[str, Any]], report["components"])
+    redis_component = components["redis"]
+    schedule_component = components["celery_schedule"]
+    assert redis_component["status"] == "skipped"
+    assert schedule_component["status"] == "degraded"
+    assert schedule_component["message"] == "No schedule runs recorded"

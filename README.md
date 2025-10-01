@@ -39,6 +39,7 @@ docker-compose.yml  Root compose file for local orchestration
    npm install
    npm run dev
    ```
+   Passkey authentication is available locally once `backend/.env.local` (or your environment) defines `PASSKEY_RELYING_PARTY_ID=localhost` and `PASSKEY_ORIGIN=http://localhost:5173`; use the home page to register a passkey or sign in with an existing one.
 
 ### SearXNG configuration
 
@@ -49,9 +50,11 @@ docker-compose.yml  Root compose file for local orchestration
 ## Tooling
 
 - `uv run ruff check` – linting
-- `uv run mypy app` – static typing
+- `uv run mypy .` – static typing across application code, tests, and scripts
 - `uv run pytest --cov=app --cov=tests` – backend tests (≥95% coverage target)
 - `npm run test` inside `frontend/` – Vitest unit coverage
+
+Targeted regression suites covering notifications, catalog backups, product quick add flows, and health reporting live under `backend/tests/`; run them individually during focused work (e.g. `uv run pytest tests/test_notifications_service.py`).
 
 ## Status
 
